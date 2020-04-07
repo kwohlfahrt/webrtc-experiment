@@ -1,0 +1,7 @@
+body {
+    display: flex;
+}
+
+.caption {
+    text-align: center;
+}
