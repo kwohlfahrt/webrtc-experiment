@@ -28,6 +28,14 @@ async function main() {
   const answer = await connections[1].createAnswer();
   await connections[1].setLocalDescription(answer);
   await connections[0].setRemoteDescription(answer);
+
+  const ws = new WebSocket("ws://localhost:4000");
+  ws.addEventListener("message", (e) => {
+    console.log("Server says:", e.data)
+  })
+  ws.addEventListener("open", () => {
+    ws.send("Hello, server!");
+  })
 }
 
 main();

@@ -1,0 +1,22 @@
+[package]
+name = "breakout"
+version = "0.1.0"
+authors = ["Kai Wohlfahrt <kai.wohlfahrt@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "0.2.16", features = [ "tcp", "stream" ] }
+tokio-tls = "0.3.0"
+tokio-util = "0.3.1"
+tungstenite = "0.10.1"
+tokio-tungstenite = "0.10.1"
+futures = "0.3"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
