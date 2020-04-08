@@ -1,4 +1,4 @@
-use breakout::{server, Error};
+use breakout::signalling::{server, Error};
 
 fn main() -> Result<(), Error> {
     server()

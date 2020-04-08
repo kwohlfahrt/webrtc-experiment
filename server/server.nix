@@ -1,4 +1,4 @@
-{ stdenv, makeRustPlatform, rustChannels, openssl, pkgconfig, bash }:
+{ stdenv, makeRustPlatform, rustChannels, openssl, gst_all_1, pkgconfig }:
 
 let
   rustPlatform = with rustChannels.stable; makeRustPlatform {
@@ -10,9 +10,11 @@ in rustPlatform.buildRustPackage rec {
   version = "0.1.0";
 
   src = ./.;
-  nativeBuildInputs = [ openssl pkgconfig ];
+  nativeBuildInputs = [ openssl pkgconfig ] ++ (with gst_all_1;
+    [ gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad ]
+  );
 
-  cargoSha256 = "0jis4h9agri19sz6sv174hml0a7wy8l444rsj26g6vwfh22d6x93";
+  cargoSha256 = "1c3nq9m7wskvz8g0cvx02ljgzn7g35vjxkr0z3xdnci237sf1jad";
 
   meta = with stdenv.lib; {
     platforms = platforms.all;
