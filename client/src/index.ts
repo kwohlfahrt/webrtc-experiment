@@ -37,32 +37,7 @@ interface Peer {
   connection: RTCPeerConnection;
 }
 
-async function local_call(element: HTMLVideoElement, media: MediaStream) {
-  const connections = [new RTCPeerConnection(), new RTCPeerConnection()];
-  media.getTracks().forEach(track => connections[0].addTrack(track, media));
-
-  connections[0].addEventListener(
-    "icecandidate",
-    e => e.candidate && connections[1].addIceCandidate(e.candidate),
-  );
-  connections[1].addEventListener(
-    "icecandidate",
-    e => e.candidate && connections[0].addIceCandidate(e.candidate),
-  );
-  connections[1].addEventListener("track", e => {
-    e.streams.forEach(stream => (element.srcObject = stream));
-  });
-
-  const offer = await connections[0].createOffer();
-  await connections[0].setLocalDescription(offer);
-  await connections[1].setRemoteDescription(offer);
-
-  const answer = await connections[1].createAnswer();
-  await connections[1].setLocalDescription(answer);
-  await connections[0].setRemoteDescription(answer);
-}
-
-async function remote_call(
+async function call(
   server: string,
   container: HTMLElement,
   media: MediaStream,
@@ -162,13 +137,8 @@ async function main() {
   });
   monitorVideo.srcObject = media;
 
-  const localVideo = (document.getElementById(
-    "local",
-  )! as any) as HTMLVideoElement;
-  await local_call(localVideo, media);
-
   const remoteVideos = document.getElementById("remotes")!;
-  await remote_call("prodo-laptop.home:4000", remoteVideos, media);
+  await call("prodo-laptop.home:4000", remoteVideos, media);
 }
 
 document.addEventListener("DOMContentLoaded", () => main());
