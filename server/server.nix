@@ -1,4 +1,4 @@
-{ stdenv, makeRustPlatform, rustChannels, openssl, gst_all_1, pkgconfig }:
+{ stdenv, makeRustPlatform, rustChannels, openssl, gst_all_1, pkgconfig, libnice }:
 
 let
   rustPlatform = with rustChannels.stable; makeRustPlatform {
@@ -10,7 +10,7 @@ in rustPlatform.buildRustPackage rec {
   version = "0.1.0";
 
   src = ./.;
-  nativeBuildInputs = [ openssl pkgconfig ] ++ (with gst_all_1;
+  nativeBuildInputs = [ openssl pkgconfig libnice ] ++ (with gst_all_1;
     [ gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad ]
   );
 

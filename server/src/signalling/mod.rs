@@ -3,7 +3,7 @@ extern crate tokio_tungstenite;
 extern crate tungstenite;
 
 mod error;
-mod message;
+pub mod message;
 
 use std::collections::HashMap;
 use std::marker::Unpin;
@@ -14,7 +14,7 @@ use futures::{Sink, SinkExt, Stream, StreamExt, TryStreamExt};
 use tokio::runtime;
 
 pub use error::Error;
-pub use message::{ClientMessage, ServerMessage};
+use message::{ClientMessage, ServerMessage};
 
 async fn handle_client<U, S>(
     mut s: S,
@@ -52,7 +52,7 @@ where
         match msg {
             tungstenite::Message::Text(content) => {
                 let msg = serde_json::from_str::<ClientMessage>(&content)?;
-                if let Some(sink) = peers.lock()?.get_mut(&msg.peer()) {
+                if let Some(sink) = peers.lock()?.get_mut(&msg.peer) {
                     let msg = tungstenite::Message::Text(serde_json::to_string(&msg.forward(id))?);
                     sink.send(msg).await;
                 }

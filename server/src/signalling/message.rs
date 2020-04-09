@@ -6,16 +6,12 @@ use serde::{Deserialize, Serialize};
 // TODO: use RawValue for efficiency on pass-through data
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClientMessage {
-    peer: usize,
+    pub peer: usize,
     #[serde(flatten)]
-    data: ClientMessageData,
+    pub data: ClientMessageData,
 }
 
 impl ClientMessage {
-    pub fn peer(&self) -> usize {
-        self.peer
-    }
-
     pub fn forward(self, source: usize) -> ServerMessage {
         ServerMessage::PeerMessage {
             message: ClientMessage {
