@@ -117,7 +117,7 @@ where
                                 .unwrap();
                             tx.unbounded_send(ClientMessage {
                                 peer,
-                                data: ClientMessageData::SDPOffer {
+                                data: ClientMessageData::SDP {
                                     data: json!({
                                         "type": "offer",
                                         "sdp": offer,
@@ -195,72 +195,76 @@ where
                                     .emit("add-ice-candidate", &[&mline_index, &candidate])
                                     .unwrap();
                             }
-                            ClientMessageData::SDPOffer { data } => {
-                                let offer = gst_sdp::SDPMessage::parse_buffer(
-                                    data["sdp"].as_str().unwrap().as_bytes(),
-                                )
-                                .unwrap();
-                                let offer = gst_webrtc::WebRTCSessionDescription::new(
-                                    gst_webrtc::WebRTCSDPType::Offer,
-                                    offer,
-                                );
-                                peers[&peer]
-                                    .emit(
-                                        "set-remote-description",
-                                        &[&offer, &None::<gst::Promise>],
+                            ClientMessageData::SDP { data } => {
+                                let sdp_type = data["type"].as_str().unwrap();
+                                if sdp_type == "answer" {
+                                    let answer = gst_sdp::SDPMessage::parse_buffer(
+                                        data["sdp"].as_str().unwrap().as_bytes(),
                                     )
                                     .unwrap();
-
-                                let webrtcbin = peers[&peer].clone();
-                                let promise = gst::Promise::new_with_change_func({
-                                    let tx = tx.clone();
-                                    move |reply| {
-                                        let reply = reply.unwrap();
-                                        let answer = reply
-                                            .get_value("answer")
-                                            .unwrap()
-                                            .get::<gst_webrtc::WebRTCSessionDescription>()
-                                            .unwrap()
-                                            .unwrap();
-                                        webrtcbin
-                                            .emit(
-                                                "set-local-description",
-                                                &[&answer, &None::<gst::Promise>],
-                                            )
-                                            .unwrap();
-                                        let answer = answer.get_sdp().as_text().unwrap();
-                                        tx.unbounded_send(ClientMessage {
-                                            peer,
-                                            data: ClientMessageData::SDPAnswer {
-                                                data: json!({
-                                                    "type": "answer",
-                                                    "sdp": answer,
-                                                }),
-                                            },
-                                        })
+                                    let answer = gst_webrtc::WebRTCSessionDescription::new(
+                                        gst_webrtc::WebRTCSDPType::Answer,
+                                        answer,
+                                    );
+                                    peers[&peer]
+                                        .emit(
+                                            "set-remote-description",
+                                            &[&answer, &None::<gst::Promise>],
+                                        )
                                         .unwrap();
-                                    }
-                                });
-
-                                peers[&peer]
-                                    .emit("create-answer", &[&None::<gst::Structure>, &promise])
-                                    .unwrap();
-                            }
-                            ClientMessageData::SDPAnswer { data } => {
-                                let answer = gst_sdp::SDPMessage::parse_buffer(
-                                    data["sdp"].as_str().unwrap().as_bytes(),
-                                )
-                                .unwrap();
-                                let answer = gst_webrtc::WebRTCSessionDescription::new(
-                                    gst_webrtc::WebRTCSDPType::Answer,
-                                    answer,
-                                );
-                                peers[&peer]
-                                    .emit(
-                                        "set-remote-description",
-                                        &[&answer, &None::<gst::Promise>],
+                                } else if sdp_type == "offer" {
+                                    let offer = gst_sdp::SDPMessage::parse_buffer(
+                                        data["sdp"].as_str().unwrap().as_bytes(),
                                     )
                                     .unwrap();
+                                    let offer = gst_webrtc::WebRTCSessionDescription::new(
+                                        gst_webrtc::WebRTCSDPType::Offer,
+                                        offer,
+                                    );
+                                    peers[&peer]
+                                        .emit(
+                                            "set-remote-description",
+                                            &[&offer, &None::<gst::Promise>],
+                                        )
+                                        .unwrap();
+
+                                    let webrtcbin = peers[&peer].clone();
+                                    let promise = gst::Promise::new_with_change_func({
+                                        let tx = tx.clone();
+                                        move |reply| {
+                                            let reply = reply.unwrap();
+                                            let answer = reply
+                                                .get_value("answer")
+                                                .unwrap()
+                                                .get::<gst_webrtc::WebRTCSessionDescription>()
+                                                .unwrap()
+                                                .unwrap();
+                                            webrtcbin
+                                                .emit(
+                                                    "set-local-description",
+                                                    &[&answer, &None::<gst::Promise>],
+                                                )
+                                                .unwrap();
+                                            let answer = answer.get_sdp().as_text().unwrap();
+                                            tx.unbounded_send(ClientMessage {
+                                                peer,
+                                                data: ClientMessageData::SDP {
+                                                    data: json!({
+                                                        "type": "answer",
+                                                        "sdp": answer,
+                                                    }),
+                                                },
+                                            })
+                                            .unwrap();
+                                        }
+                                    });
+
+                                    peers[&peer]
+                                        .emit("create-answer", &[&None::<gst::Structure>, &promise])
+                                        .unwrap();
+                                } else {
+                                    unimplemented!();
+                                }
                             }
                         },
                     };

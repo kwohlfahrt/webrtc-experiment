@@ -26,8 +26,7 @@ impl ClientMessage {
 #[serde(tag = "type")]
 pub enum ClientMessageData {
     ICECandidate { data: serde_json::Value },
-    SDPOffer { data: serde_json::Value },
-    SDPAnswer { data: serde_json::Value },
+    SDP { data: serde_json::Value },
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -24,11 +24,7 @@ type ClientMessage = {
       data: RTCIceCandidateInit;
     }
   | {
-      type: "SDPAnswer";
-      data: RTCSessionDescriptionInit;
-    }
-  | {
-      type: "SDPOffer";
+      type: "SDP";
       data: RTCSessionDescriptionInit;
     });
 
@@ -64,7 +60,7 @@ async function call(
     connection.addEventListener("negotiationneeded", async () => {
       await connection.setLocalDescription(await connection.createOffer());
       sendMessage({
-        type: "SDPOffer",
+        type: "SDP",
         peer: id,
         data: connection.localDescription!,
       });
@@ -108,20 +104,22 @@ async function call(
     } else if (data.type == "PeerMessage") {
       const { peer } = data.message;
       const { connection } = knownPeers.get(peer)!;
-
       if (data.message.type == "ICECandidate") {
         await connection.addIceCandidate(data.message.data);
-      } else if (data.message.type == "SDPAnswer") {
-        await connection.setRemoteDescription(data.message.data);
-      } else if (data.message.type == "SDPOffer") {
-        await connection.setRemoteDescription(data.message.data);
-        media.getTracks().forEach(track => connection.addTrack(track, media));
-        await connection.setLocalDescription(await connection.createAnswer());
-        sendMessage({
-          type: "SDPAnswer",
-          peer,
-          data: connection.localDescription!,
-        });
+      } else if (data.message.type == "SDP") {
+        const sdp = data.message.data;
+        if (sdp.type == "answer") {
+          await connection.setRemoteDescription(sdp);
+        } else if (sdp.type == "offer") {
+          await connection.setRemoteDescription(sdp);
+          media.getTracks().forEach(track => connection.addTrack(track, media));
+          await connection.setLocalDescription(await connection.createAnswer());
+          sendMessage({
+            type: "SDP",
+            peer,
+            data: connection.localDescription!,
+          });
+        }
       }
     }
   });
