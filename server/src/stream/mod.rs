@@ -44,6 +44,16 @@ where
         .unwrap();
     src.set_property("is-live", &true).unwrap();
 
+    let enc = gst::ElementFactory::find("vp8enc")
+        .unwrap()
+        .create(Some("enc"))
+        .unwrap();
+
+    let pay = gst::ElementFactory::find("rtpvp8pay")
+        .unwrap()
+        .create(Some("pay"))
+        .unwrap();
+
     let tee = gst::ElementFactory::find("tee")
         .unwrap()
         .create(Some("tee"))
@@ -62,14 +72,21 @@ where
 
     let pipeline = gst::Pipeline::new(Some("pipeline"));
     pipeline
-        .add_many(&[&src, &tee, &queue, &fake_sink])
+        .add_many(&[&src, &enc, &pay, &tee, &queue, &fake_sink])
         .unwrap();
-    src.link(&tee).unwrap();
+    src.link(&enc).unwrap();
+    enc.link(&pay).unwrap();
+    let caps = gst::Caps::builder("application/x-rtp")
+        .field(&"payload", &96)
+        .field(&"media", &"video")
+        .field(&"encoding-name", &"VP8")
+        .build();
+    pay.link_filtered(&tee, Some(&caps)).unwrap();
     tee.link(&queue).unwrap();
     queue.link(&fake_sink).unwrap();
     pipeline.set_state(gst::State::Playing).unwrap();
 
-    let add_peer = |peer, _polite| {
+    let add_peer = |peer, polite: bool| {
         let queue = gst::ElementFactory::find("queue")
             .unwrap()
             .create(Some("queue"))
@@ -158,10 +175,26 @@ where
             })
             .unwrap();
 
+        webrtcbin.connect_pad_added({
+            let bin = bin.clone();
+            move |_, pad| {
+                let fake_sink = gst::ElementFactory::find("fakesink")
+                    .unwrap()
+                    .create(Some("fake_sink"))
+                    .unwrap();
+                let sink_pad = fake_sink.get_static_pad("sink").unwrap();
+                bin.add(&fake_sink).unwrap();
+                pad.link(&sink_pad).unwrap();
+                fake_sink.sync_state_with_parent().unwrap();
+            }
+        });
+
         pipeline.add(&bin).unwrap();
-        src_pad.link(&pad).unwrap();
         bin.sync_state_with_parent().unwrap();
-        webrtcbin
+        if !polite {
+            src_pad.link(&pad).unwrap();
+        }
+        (webrtcbin, pad, src_pad)
     };
 
     let (ws_sink, ws_src) = ws.split();
@@ -191,13 +224,15 @@ where
                             ClientMessageData::ICECandidate { data } => {
                                 let mline_index = data["sdpMLineIndex"].as_u64().unwrap() as u32;
                                 let candidate = &data["candidate"].as_str().unwrap();
-                                peers[&peer]
+                                let webrtcbin = &peers[&peer].0;
+                                webrtcbin
                                     .emit("add-ice-candidate", &[&mline_index, &candidate])
                                     .unwrap();
                             }
                             ClientMessageData::SDP { data } => {
                                 let sdp_type = data["type"].as_str().unwrap();
                                 if sdp_type == "answer" {
+                                    let webrtcbin = &peers[&peer].0;
                                     let answer = gst_sdp::SDPMessage::parse_buffer(
                                         data["sdp"].as_str().unwrap().as_bytes(),
                                     )
@@ -206,13 +241,14 @@ where
                                         gst_webrtc::WebRTCSDPType::Answer,
                                         answer,
                                     );
-                                    peers[&peer]
+                                    webrtcbin
                                         .emit(
                                             "set-remote-description",
                                             &[&answer, &None::<gst::Promise>],
                                         )
                                         .unwrap();
                                 } else if sdp_type == "offer" {
+                                    let (webrtcbin, pad, src_pad) = &peers[&peer];
                                     let offer = gst_sdp::SDPMessage::parse_buffer(
                                         data["sdp"].as_str().unwrap().as_bytes(),
                                     )
@@ -221,16 +257,18 @@ where
                                         gst_webrtc::WebRTCSDPType::Offer,
                                         offer,
                                     );
-                                    peers[&peer]
+                                    webrtcbin
                                         .emit(
                                             "set-remote-description",
                                             &[&offer, &None::<gst::Promise>],
                                         )
                                         .unwrap();
 
-                                    let webrtcbin = peers[&peer].clone();
+                                    src_pad.link(pad).unwrap();
+
                                     let promise = gst::Promise::new_with_change_func({
                                         let tx = tx.clone();
+                                        let webrtcbin = webrtcbin.clone();
                                         move |reply| {
                                             let reply = reply.unwrap();
                                             let answer = reply
@@ -259,7 +297,7 @@ where
                                         }
                                     });
 
-                                    peers[&peer]
+                                    webrtcbin
                                         .emit("create-answer", &[&None::<gst::Structure>, &promise])
                                         .unwrap();
                                 } else {
