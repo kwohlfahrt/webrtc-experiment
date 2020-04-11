@@ -113,7 +113,6 @@ where
             tee.request_pad(&template, None, None).unwrap()
         };
 
-        // TODO: Use Bus & Futures here?
         webrtcbin
             .connect("on-negotiation-needed", false, {
                 let tx = tx.clone();
@@ -194,11 +193,12 @@ where
         });
 
         pipeline.add(&bin).unwrap();
-        bin.sync_state_with_parent().unwrap();
+        bin.set_state(gst::State::Ready).unwrap();
         if !polite {
             src_pad.link(&pad).unwrap();
+            bin.sync_state_with_parent().unwrap();
         }
-        (webrtcbin, pad, src_pad)
+        (webrtcbin, bin, pad, src_pad)
     };
 
     let (ws_sink, ws_src) = ws.split();
@@ -226,7 +226,7 @@ where
                             message: ClientMessage { peer, data },
                         } => match data {
                             ClientMessageData::ICECandidate { data } => {
-                                let webrtcbin = &peers[&peer].0;
+                                let (webrtcbin, _, _, _) = &peers[&peer];
                                 let mline_index = data["sdpMLineIndex"].as_u64().unwrap() as u32;
                                 let candidate = &data["candidate"].as_str().unwrap();
                                 if candidate.len() > 0 {
@@ -238,7 +238,7 @@ where
                             ClientMessageData::SDP { data } => {
                                 let sdp_type = data["type"].as_str().unwrap();
                                 if sdp_type == "answer" {
-                                    let webrtcbin = &peers[&peer].0;
+                                    let (webrtcbin, bin, _, _) = &peers[&peer];
                                     let answer = gst_sdp::SDPMessage::parse_buffer(
                                         data["sdp"].as_str().unwrap().as_bytes(),
                                     )
@@ -253,8 +253,9 @@ where
                                             &[&answer, &None::<gst::Promise>],
                                         )
                                         .unwrap();
+                                    bin.sync_state_with_parent().unwrap();
                                 } else if sdp_type == "offer" {
-                                    let (webrtcbin, pad, src_pad) = &peers[&peer];
+                                    let (webrtcbin, bin, pad, src_pad) = &peers[&peer];
                                     let offer = gst_sdp::SDPMessage::parse_buffer(
                                         data["sdp"].as_str().unwrap().as_bytes(),
                                     )
@@ -271,10 +272,10 @@ where
                                         .unwrap();
 
                                     src_pad.link(pad).unwrap();
-
                                     let promise = gst::Promise::new_with_change_func({
                                         let tx = tx.clone();
                                         let webrtcbin = webrtcbin.clone();
+                                        let bin = bin.clone();
                                         move |reply| {
                                             let reply = reply.unwrap();
                                             let answer = reply
@@ -289,6 +290,7 @@ where
                                                     &[&answer, &None::<gst::Promise>],
                                                 )
                                                 .unwrap();
+                                            bin.sync_state_with_parent().unwrap();
                                             tx.unbounded_send(ClientMessage {
                                                 peer,
                                                 data: ClientMessageData::SDP {
