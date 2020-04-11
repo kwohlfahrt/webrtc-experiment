@@ -87,6 +87,7 @@ async function call(
     if (peer != null) {
       knownPeers.delete(id);
       container.removeChild(peer.element);
+      peer.connection.close();
     }
   }
 
