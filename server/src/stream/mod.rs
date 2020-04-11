@@ -13,7 +13,7 @@ use std::marker::{Send, Unpin};
 use futures::channel::mpsc;
 use futures::future::{ok, try_select};
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
-use gst::prelude::ObjectExt;
+use gst::prelude::{ObjectExt, ToValue};
 use gst::{
     ElementExt, ElementExtManual, GObjectExtManualGst, GstBinExt, GstBinExtManual, PadExtManual,
 };
@@ -43,6 +43,7 @@ where
         .create(Some("src"))
         .unwrap();
     src.set_property("is-live", &true).unwrap();
+    src.set_property_from_str("pattern", &"smtpe");
 
     let enc = gst::ElementFactory::find("vp8enc")
         .unwrap()
@@ -121,6 +122,7 @@ where
 
                     let promise = gst::Promise::new_with_change_func({
                         let tx = tx.clone();
+                        let webrtcbin = webrtcbin.clone();
                         move |reply| {
                             let reply = reply.unwrap();
                             let offer = reply
@@ -128,16 +130,18 @@ where
                                 .unwrap()
                                 .get::<gst_webrtc::WebRTCSessionDescription>()
                                 .unwrap()
-                                .unwrap()
-                                .get_sdp()
-                                .as_text()
                                 .unwrap();
+
+                            webrtcbin
+                                .emit("set-local-description", &[&offer, &None::<gst::Promise>])
+                                .unwrap();
+
                             tx.unbounded_send(ClientMessage {
                                 peer,
                                 data: ClientMessageData::SDP {
                                     data: json!({
                                         "type": "offer",
-                                        "sdp": offer,
+                                        "sdp": offer.get_sdp().as_text().unwrap(),
                                     }),
                                 },
                             })
@@ -222,12 +226,14 @@ where
                             message: ClientMessage { peer, data },
                         } => match data {
                             ClientMessageData::ICECandidate { data } => {
+                                let webrtcbin = &peers[&peer].0;
                                 let mline_index = data["sdpMLineIndex"].as_u64().unwrap() as u32;
                                 let candidate = &data["candidate"].as_str().unwrap();
-                                let webrtcbin = &peers[&peer].0;
-                                webrtcbin
-                                    .emit("add-ice-candidate", &[&mline_index, &candidate])
-                                    .unwrap();
+                                if candidate.len() > 0 {
+                                    webrtcbin
+                                        .emit("add-ice-candidate", &[&mline_index, &candidate])
+                                        .unwrap();
+                                }
                             }
                             ClientMessageData::SDP { data } => {
                                 let sdp_type = data["type"].as_str().unwrap();
@@ -283,13 +289,12 @@ where
                                                     &[&answer, &None::<gst::Promise>],
                                                 )
                                                 .unwrap();
-                                            let answer = answer.get_sdp().as_text().unwrap();
                                             tx.unbounded_send(ClientMessage {
                                                 peer,
                                                 data: ClientMessageData::SDP {
                                                     data: json!({
                                                         "type": "answer",
-                                                        "sdp": answer,
+                                                        "sdp": answer.get_sdp().as_text().unwrap(),
                                                     }),
                                                 },
                                             })
