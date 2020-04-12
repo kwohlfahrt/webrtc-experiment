@@ -36,6 +36,7 @@ interface Peer {
 async function call(
   server: string,
   container: HTMLElement,
+  callButton: HTMLButtonElement,
   media: MediaStream,
 ) {
   const ws = new WebSocket(`ws://${server}`);
@@ -44,7 +45,7 @@ async function call(
   }
   const knownPeers = new Map<number, Peer>();
 
-  async function add_peer(id: number, polite: boolean) {
+  async function addPeer(id: number, polite: boolean) {
     const connection = new RTCPeerConnection();
     const video = document.createElement("video");
     video.autoplay = true;
@@ -82,7 +83,7 @@ async function call(
     });
   }
 
-  function remove_peer(id: number) {
+  function removePeer(id: number) {
     const peer = knownPeers.get(id);
     if (peer != null) {
       knownPeers.delete(id);
@@ -91,17 +92,35 @@ async function call(
     }
   }
 
+  callButton.innerHTML = "Hang up";
+  callButton.addEventListener(
+    "click",
+    () => {
+      ws.close();
+      for (const peer of knownPeers.keys()) {
+        removePeer(peer);
+      }
+      callButton.innerHTML = "Call";
+      callButton.addEventListener(
+        "click",
+        () => call(server, container, callButton, media),
+        { once: true },
+      );
+    },
+    { once: true },
+  );
+
   ws.addEventListener("message", async e => {
     const data = JSON.parse(e.data) as ServerMessage;
     if (data.type == "Hello") {
       const { peers } = data;
-      await Promise.all(peers.map(p => add_peer(p, true)));
+      await Promise.all(peers.map(p => addPeer(p, true)));
     } else if (data.type == "AddPeer") {
       const { peer } = data;
-      await add_peer(peer, false);
+      await addPeer(peer, false);
     } else if (data.type == "RemovePeer") {
       const { peer } = data;
-      remove_peer(peer);
+      removePeer(peer);
     } else if (data.type == "PeerMessage") {
       const { peer } = data.message;
       const { connection } = knownPeers.get(peer)!;
@@ -127,9 +146,7 @@ async function call(
 }
 
 async function main() {
-  const monitorVideo = (document.getElementById(
-    "monitor",
-  )! as any) as HTMLVideoElement;
+  const monitorVideo = document.getElementById("monitor")! as HTMLVideoElement;
   const media = await navigator.mediaDevices.getUserMedia({
     audio: true,
     video: true,
@@ -137,7 +154,12 @@ async function main() {
   monitorVideo.srcObject = media;
 
   const remoteVideos = document.getElementById("remotes")!;
-  await call("prodo-laptop.home:4000", remoteVideos, media);
+  const callButton = document.getElementById("call")! as HTMLButtonElement;
+  callButton.addEventListener(
+    "click",
+    () => call("prodo-laptop.home:4000", remoteVideos, callButton, media),
+    { once: true },
+  );
 }
 
 document.addEventListener("DOMContentLoaded", () => main());
