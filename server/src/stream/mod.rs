@@ -6,6 +6,7 @@ extern crate tokio_tungstenite;
 extern crate tungstenite;
 
 mod error;
+mod pipeline;
 
 use std::collections::HashMap;
 use std::marker::{Send, Unpin};
@@ -15,7 +16,8 @@ use futures::future::{ok, try_select};
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use gst::prelude::{ObjectExt, ToValue};
 use gst::{
-    ElementExt, ElementExtManual, GObjectExtManualGst, GstBinExt, GstBinExtManual, PadExtManual,
+    ElementExt, ElementExtManual, GObjectExtManualGst, GstBinExt, GstBinExtManual, PadExt,
+    PadExtManual,
 };
 use gstreamer as gst;
 use gstreamer_sdp as gst_sdp;
@@ -38,53 +40,8 @@ where
     let mut peers: HashMap<usize, _> = HashMap::new();
     let (tx, rx) = mpsc::unbounded::<ClientMessage>();
 
-    let src = gst::ElementFactory::find("videotestsrc")
-        .unwrap()
-        .create(Some("src"))
-        .unwrap();
-    src.set_property("is-live", &true).unwrap();
-    src.set_property_from_str("pattern", &"smtpe");
-
-    let enc = gst::ElementFactory::find("vp8enc")
-        .unwrap()
-        .create(Some("enc"))
-        .unwrap();
-
-    let pay = gst::ElementFactory::find("rtpvp8pay")
-        .unwrap()
-        .create(Some("pay"))
-        .unwrap();
-
-    let tee = gst::ElementFactory::find("tee")
-        .unwrap()
-        .create(Some("tee"))
-        .unwrap();
-
-    let queue = gst::ElementFactory::find("queue")
-        .unwrap()
-        .create(Some("queue"))
-        .unwrap();
-
-    let fake_sink = gst::ElementFactory::find("fakesink")
-        .unwrap()
-        .create(Some("fake_sink"))
-        .unwrap();
-    fake_sink.set_property("sync", &true).unwrap();
-
     let pipeline = gst::Pipeline::new(Some("pipeline"));
-    pipeline
-        .add_many(&[&src, &enc, &pay, &tee, &queue, &fake_sink])
-        .unwrap();
-    src.link(&enc).unwrap();
-    enc.link(&pay).unwrap();
-    let caps = gst::Caps::builder("application/x-rtp")
-        .field(&"payload", &96)
-        .field(&"media", &"video")
-        .field(&"encoding-name", &"VP8")
-        .build();
-    pay.link_filtered(&tee, Some(&caps)).unwrap();
-    tee.link(&queue).unwrap();
-    queue.link(&fake_sink).unwrap();
+    let tee = pipeline::add_src(&pipeline, false);
     pipeline.set_state(gst::State::Playing).unwrap();
 
     let add_peer = |peer, polite: bool| {
@@ -178,20 +135,6 @@ where
             })
             .unwrap();
 
-        webrtcbin.connect_pad_added({
-            let bin = bin.clone();
-            move |_, pad| {
-                let fake_sink = gst::ElementFactory::find("fakesink")
-                    .unwrap()
-                    .create(Some("fake_sink"))
-                    .unwrap();
-                let sink_pad = fake_sink.get_static_pad("sink").unwrap();
-                bin.add(&fake_sink).unwrap();
-                pad.link(&sink_pad).unwrap();
-                fake_sink.sync_state_with_parent().unwrap();
-            }
-        });
-
         pipeline.add(&bin).unwrap();
         bin.set_state(gst::State::Ready).unwrap();
         if !polite {
@@ -271,7 +214,10 @@ where
                                         )
                                         .unwrap();
 
-                                    src_pad.link(pad).unwrap();
+                                    if !src_pad.is_linked() {
+                                        src_pad.link(pad).unwrap();
+                                    }
+
                                     let promise = gst::Promise::new_with_change_func({
                                         let tx = tx.clone();
                                         let webrtcbin = webrtcbin.clone();

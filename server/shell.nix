@@ -1,4 +1,4 @@
-with import <nixpkgs> {}; callPackage ./server.nix {} // {
+with import <nixpkgs-unstable> {}; callPackage ./server.nix {} // {
   # Environment Variables
   RUST_BACKTRACE = 1;
 }
