@@ -35,10 +35,21 @@ interface Peer {
 
 async function call(
   server: string,
-  container: HTMLElement,
   callButton: HTMLButtonElement,
-  media: MediaStream,
+  monitorVideo: HTMLVideoElement,
+  container: HTMLElement,
 ) {
+  const media = await navigator.mediaDevices
+    .getUserMedia({
+      audio: true,
+      video: true,
+    })
+    .catch(e => {
+      console.error(e);
+      return null;
+    });
+  monitorVideo.srcObject = media;
+
   const ws = new WebSocket(`ws://${server}`);
   function sendMessage(msg: ClientMessage) {
     return ws.send(JSON.stringify(msg));
@@ -67,7 +78,7 @@ async function call(
       });
     });
 
-    if (!polite) {
+    if (!polite && media != null) {
       media.getTracks().forEach(track => connection.addTrack(track, media));
     }
 
@@ -101,16 +112,21 @@ async function call(
         removePeer(peer);
       }
       callButton.innerHTML = "Call";
+      if (media != null)
+	media.getTracks().forEach(t => t.stop());
       callButton.addEventListener(
         "click",
-        () => call(server, container, callButton, media),
+        () =>
+          call(server, callButton, monitorVideo, container).catch(
+            console.error,
+          ),
         { once: true },
       );
     },
     { once: true },
   );
 
-  ws.addEventListener("message", async e => {
+  async function handleMessage(e: MessageEvent): Promise<void> {
     const data = JSON.parse(e.data) as ServerMessage;
     if (data.type == "Hello") {
       const { peers } = data;
@@ -132,7 +148,11 @@ async function call(
           await connection.setRemoteDescription(sdp);
         } else if (sdp.type == "offer") {
           await connection.setRemoteDescription(sdp);
-          media.getTracks().forEach(track => connection.addTrack(track, media));
+          if (media != null) {
+            media
+              .getTracks()
+              .forEach(track => connection.addTrack(track, media));
+          }
           await connection.setLocalDescription(await connection.createAnswer());
           sendMessage({
             type: "SDP",
@@ -142,24 +162,26 @@ async function call(
         }
       }
     }
-  });
+  }
+
+  ws.addEventListener("message", e => handleMessage(e).catch(console.error));
 }
 
-async function main() {
+function main() {
   const monitorVideo = document.getElementById("monitor")! as HTMLVideoElement;
-  const media = await navigator.mediaDevices.getUserMedia({
-    audio: true,
-    video: true,
-  });
-  monitorVideo.srcObject = media;
-
   const remoteVideos = document.getElementById("remotes")!;
   const callButton = document.getElementById("call")! as HTMLButtonElement;
   callButton.addEventListener(
     "click",
-    () => call("prodo-laptop.home:4000", remoteVideos, callButton, media),
+    () =>
+      call(
+        "localhost:4000",
+        callButton,
+        monitorVideo,
+        remoteVideos,
+      ).catch(console.error),
     { once: true },
   );
 }
 
-document.addEventListener("DOMContentLoaded", () => main());
+document.addEventListener("DOMContentLoaded", main);
