@@ -41,34 +41,43 @@ where
     let (tx, rx) = mpsc::unbounded::<ClientMessage>();
 
     let pipeline = gst::Pipeline::new(Some("pipeline"));
-    let tee = pipeline::add_src(&pipeline, false);
+    let tees = pipeline::add_src(&pipeline, false);
     pipeline.set_state(gst::State::Playing).unwrap();
 
     let add_peer = |peer, polite: bool| {
-        let queue = gst::ElementFactory::find("queue")
-            .unwrap()
-            .create(Some("queue"))
-            .unwrap();
-
+        let bin = gst::Bin::new(None);
         let webrtcbin = gst::ElementFactory::find("webrtcbin")
             .unwrap()
             .create(Some("webrtcbin"))
             .unwrap();
+        bin.add(&webrtcbin).unwrap();
 
-        let bin = gst::Bin::new(None);
-        bin.add_many(&[&queue, &webrtcbin]).unwrap();
-        queue.link(&webrtcbin).unwrap();
+        let tee_pads = tees
+            .iter()
+            .map(|(_, tee)| {
+                let template = tee.get_pad_template(&"src_%u").unwrap();
+                tee.request_pad(&template, None, None).unwrap()
+            })
+            .collect::<Vec<_>>();
 
-        let pad = {
-            let pad = queue.get_static_pad("sink").unwrap();
-            gst::GhostPad::new(Some("sink"), &pad).unwrap()
-        };
-        bin.add_pad(&pad).unwrap();
+        let bin_pads = tees
+            .iter()
+            .map(|(name, _)| {
+                let queue = gst::ElementFactory::find("queue")
+                    .unwrap()
+                    .create(Some(&format!("{}_{}", name, "queue")))
+                    .unwrap();
+                bin.add(&queue).unwrap();
+                queue.link(&webrtcbin).unwrap();
 
-        let src_pad = {
-            let template = tee.get_pad_template(&"src_%u").unwrap();
-            tee.request_pad(&template, None, None).unwrap()
-        };
+                let queue_pad = queue.get_static_pad("sink").unwrap();
+                gst::GhostPad::new(Some(&format!("{}_{}", name, "sink")), &queue_pad).unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        for bin_pad in bin_pads.iter() {
+            bin.add_pad(bin_pad).unwrap();
+        }
 
         webrtcbin
             .connect("on-negotiation-needed", false, {
@@ -138,10 +147,12 @@ where
         pipeline.add(&bin).unwrap();
         bin.set_state(gst::State::Ready).unwrap();
         if !polite {
-            src_pad.link(&pad).unwrap();
+            for (bin_pad, tee_pad) in bin_pads.iter().zip(tee_pads.iter()) {
+                tee_pad.link(bin_pad).unwrap();
+            }
             bin.sync_state_with_parent().unwrap();
         }
-        (webrtcbin, bin, pad, src_pad)
+        (webrtcbin, bin, bin_pads, tee_pads)
     };
 
     let (ws_sink, ws_src) = ws.split();
@@ -198,7 +209,7 @@ where
                                         .unwrap();
                                     bin.sync_state_with_parent().unwrap();
                                 } else if sdp_type == "offer" {
-                                    let (webrtcbin, bin, pad, src_pad) = &peers[&peer];
+                                    let (webrtcbin, bin, bin_pads, src_pads) = &peers[&peer];
                                     let offer = gst_sdp::SDPMessage::parse_buffer(
                                         data["sdp"].as_str().unwrap().as_bytes(),
                                     )
@@ -214,8 +225,10 @@ where
                                         )
                                         .unwrap();
 
-                                    if !src_pad.is_linked() {
-                                        src_pad.link(pad).unwrap();
+                                    for (bin_pad, src_pad) in bin_pads.iter().zip(src_pads) {
+                                        if !src_pad.is_linked() {
+                                            src_pad.link(bin_pad).unwrap();
+                                        }
                                     }
 
                                     let promise = gst::Promise::new_with_change_func({
