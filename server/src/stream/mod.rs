@@ -159,6 +159,7 @@ where
                     match msg {
                         ServerMessage::Hello {
                             peers: remote_peers,
+                            ..
                         } => {
                             remote_peers.iter().for_each(|peer| {
                                 peers.insert(*peer, add_peer(*peer, true));
@@ -293,6 +294,8 @@ pub fn main() -> Result<(), Error> {
         .build()?;
 
     let connection = std::net::TcpStream::connect(("::", 4000))?;
+    connection.set_nonblocking(true)?;
+
     let connection = {
         let _guard = rt.enter();
         tokio::net::TcpStream::from_std(connection)?

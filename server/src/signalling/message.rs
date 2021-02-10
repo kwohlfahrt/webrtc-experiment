@@ -29,7 +29,7 @@ pub enum ClientMessageData {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
-    Hello { peers: Vec<usize> },
+    Hello { id: usize, peers: Vec<usize> },
     AddPeer { peer: usize },
     RemovePeer { peer: usize },
     PeerMessage { message: ClientMessage },

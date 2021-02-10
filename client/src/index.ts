@@ -1,6 +1,7 @@
 type ServerMessage =
   | {
       type: "Hello";
+      id: number;
       peers: number[];
     }
   | {
@@ -26,7 +27,8 @@ type ClientMessage = {
   | {
       type: "SDP";
       data: RTCSessionDescriptionInit;
-    });
+    }
+);
 
 interface Peer {
   element: HTMLElement;
@@ -37,6 +39,7 @@ async function call(
   server: string,
   callButton: HTMLButtonElement,
   monitorVideo: HTMLVideoElement,
+  idDisplay: HTMLSpanElement,
   container: HTMLElement,
 ) {
   const media = await navigator.mediaDevices
@@ -44,7 +47,7 @@ async function call(
       audio: true,
       video: true,
     })
-    .catch(e => {
+    .catch((e) => {
       console.error(e);
       return null;
     });
@@ -61,13 +64,13 @@ async function call(
     const video = document.createElement("video");
     video.autoplay = true;
 
-    connection.addEventListener("icecandidate", e => {
+    connection.addEventListener("icecandidate", (e) => {
       if (e.candidate) {
         sendMessage({ type: "ICECandidate", peer: id, data: e.candidate });
       }
     });
-    connection.addEventListener("track", e => {
-      e.streams.forEach(stream => (video.srcObject = stream));
+    connection.addEventListener("track", (e) => {
+      e.streams.forEach((stream) => (video.srcObject = stream));
     });
     connection.addEventListener("negotiationneeded", async () => {
       await connection.setLocalDescription(await connection.createOffer());
@@ -79,7 +82,7 @@ async function call(
     });
 
     if (!polite && media != null) {
-      media.getTracks().forEach(track => connection.addTrack(track, media));
+      media.getTracks().forEach((track) => connection.addTrack(track, media));
     }
 
     const child = document.createElement("div");
@@ -112,12 +115,12 @@ async function call(
         removePeer(peer);
       }
       callButton.innerHTML = "Call";
-      if (media != null)
-	media.getTracks().forEach(t => t.stop());
+      idDisplay.innerHTML = "?";
+      if (media != null) media.getTracks().forEach((t) => t.stop());
       callButton.addEventListener(
         "click",
         () =>
-          call(server, callButton, monitorVideo, container).catch(
+          call(server, callButton, monitorVideo, idDisplay, container).catch(
             console.error,
           ),
         { once: true },
@@ -129,8 +132,9 @@ async function call(
   async function handleMessage(e: MessageEvent): Promise<void> {
     const data = JSON.parse(e.data) as ServerMessage;
     if (data.type == "Hello") {
-      const { peers } = data;
-      await Promise.all(peers.map(p => addPeer(p, true)));
+      const { id, peers } = data;
+      idDisplay.innerHTML = `${id}`;
+      await Promise.all(peers.map((p) => addPeer(p, true)));
     } else if (data.type == "AddPeer") {
       const { peer } = data;
       await addPeer(peer, false);
@@ -151,7 +155,7 @@ async function call(
           if (media != null) {
             media
               .getTracks()
-              .forEach(track => connection.addTrack(track, media));
+              .forEach((track) => connection.addTrack(track, media));
           }
           await connection.setLocalDescription(await connection.createAnswer());
           sendMessage({
@@ -164,12 +168,13 @@ async function call(
     }
   }
 
-  ws.addEventListener("message", e => handleMessage(e).catch(console.error));
+  ws.addEventListener("message", (e) => handleMessage(e).catch(console.error));
 }
 
 function main() {
   const monitorVideo = document.getElementById("monitor")! as HTMLVideoElement;
   const remoteVideos = document.getElementById("remotes")!;
+  const idDisplay = document.getElementById("id")! as HTMLSpanElement;
   const callButton = document.getElementById("call")! as HTMLButtonElement;
   callButton.addEventListener(
     "click",
@@ -178,6 +183,7 @@ function main() {
         "localhost:4000",
         callButton,
         monitorVideo,
+        idDisplay,
         remoteVideos,
       ).catch(console.error),
     { once: true },

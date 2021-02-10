@@ -21,9 +21,11 @@ async fn handle_client<U, S>(
 ) -> Result<(), Error>
 where
     U: Sink<tungstenite::Message> + Unpin,
+    Error: From<U::Error>,
     S: Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
 {
     let msg = tungstenite::Message::Text(serde_json::to_string(&ServerMessage::Hello {
+        id: id,
         peers: peers
             .lock()?
             .keys()
@@ -31,12 +33,14 @@ where
             .filter(|&peer_id| peer_id != id)
             .collect(),
     })?);
+
     if let Some(sink) = peers.lock()?.get_mut(&id) {
-        sink.send(msg).await;
+        sink.send(msg).await?;
     }
 
     let msg =
         tungstenite::Message::Text(serde_json::to_string(&ServerMessage::AddPeer { peer: id })?);
+
     future::join_all(
         peers
             .lock()?
@@ -52,10 +56,13 @@ where
                 let msg = serde_json::from_str::<ClientMessage>(&content)?;
                 if let Some(sink) = peers.lock()?.get_mut(&msg.peer) {
                     let msg = tungstenite::Message::Text(serde_json::to_string(&msg.forward(id))?);
-                    sink.send(msg).await;
+                    sink.send(msg).await?;
                 }
             }
-            _ => (),
+            tungstenite::Message::Close(_) => {
+                break;
+            }
+            _ => {}
         }
     }
 
@@ -70,6 +77,7 @@ where
             .map(|peer| peer.send(msg.clone())),
     )
     .await;
+
     Ok(())
 }
 
@@ -81,6 +89,8 @@ pub fn main() -> Result<(), Error> {
     let clients = Arc::new(Mutex::new(HashMap::new()));
 
     let listener = std::net::TcpListener::bind(("::", 4000))?;
+    listener.set_nonblocking(true)?;
+
     let listener = {
         let _guard = rt.enter();
         tokio::net::TcpListener::from_std(listener)?
