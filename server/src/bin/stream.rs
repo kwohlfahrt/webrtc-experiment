@@ -1,5 +1,5 @@
-use breakout::stream::{server, Error};
+use webrtc::stream;
 
-fn main() -> Result<(), Error> {
-    server()
+fn main() -> Result<(), stream::Error> {
+    stream::main()
 }

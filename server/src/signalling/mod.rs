@@ -1,7 +1,3 @@
-extern crate tokio;
-extern crate tokio_tungstenite;
-extern crate tungstenite;
-
 mod error;
 pub mod message;
 
@@ -12,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use futures::future;
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStreamExt};
 use tokio::runtime;
+use tokio_stream::wrappers::TcpListenerStream;
+use tokio_tungstenite::tungstenite;
 
 pub use error::Error;
 use message::{ClientMessage, ServerMessage};
@@ -75,13 +73,20 @@ where
     Ok(())
 }
 
-pub fn server() -> Result<(), Error> {
-    let mut rt = runtime::Builder::new().enable_all().build()?;
+pub fn main() -> Result<(), Error> {
+    let rt = runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
     let clients = Arc::new(Mutex::new(HashMap::new()));
 
-    let ws_listener = std::net::TcpListener::bind(("::", 4000))?;
-    let ws_listener = rt
-        .enter(|| tokio::net::TcpListener::from_std(ws_listener))?
+    let listener = std::net::TcpListener::bind(("::", 4000))?;
+    let listener = {
+        let _guard = rt.enter();
+        tokio::net::TcpListener::from_std(listener)?
+    };
+
+    let listener = TcpListenerStream::new(listener)
         .err_into()
         .and_then(|s| tokio_tungstenite::accept_async(s))
         .err_into()
@@ -94,7 +99,7 @@ pub fn server() -> Result<(), Error> {
             })
         });
 
-    let result = ws_listener.try_for_each_concurrent(None, |(i, c)| handle_client(c, i, &clients));
+    let result = listener.try_for_each_concurrent(None, |(i, c)| handle_client(c, i, &clients));
 
     rt.block_on(result)
 }

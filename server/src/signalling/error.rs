@@ -1,7 +1,9 @@
+use tokio_tungstenite::tungstenite;
+
 #[derive(Debug)]
 pub enum Error {
     IO(std::io::Error),
-    WebSocket(tungstenite::error::Error),
+    WebSocket(tungstenite::Error),
     JSON(serde_json::error::Error),
     Poison,
 }
@@ -12,8 +14,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<tungstenite::error::Error> for Error {
-    fn from(e: tungstenite::error::Error) -> Self {
+impl From<tungstenite::Error> for Error {
+    fn from(e: tungstenite::Error) -> Self {
         Error::WebSocket(e)
     }
 }

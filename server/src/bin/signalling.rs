@@ -1,5 +1,5 @@
-use breakout::signalling::{server, Error};
+use webrtc::signalling;
 
-fn main() -> Result<(), Error> {
-    server()
+fn main() -> Result<(), signalling::Error> {
+    signalling::main()
 }

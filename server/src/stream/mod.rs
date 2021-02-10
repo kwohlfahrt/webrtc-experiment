@@ -1,10 +1,3 @@
-extern crate gstreamer;
-extern crate serde;
-extern crate serde_json;
-extern crate tokio;
-extern crate tokio_tungstenite;
-extern crate tungstenite;
-
 mod error;
 mod pipeline;
 
@@ -24,6 +17,7 @@ use gstreamer_sdp as gst_sdp;
 use gstreamer_webrtc as gst_webrtc;
 use serde_json::json;
 use tokio::runtime;
+use tokio_tungstenite::tungstenite;
 
 use crate::signalling::message::{ClientMessage, ClientMessageData, ServerMessage};
 
@@ -70,8 +64,7 @@ where
                 bin.add(&queue).unwrap();
                 queue.link(&webrtcbin).unwrap();
 
-                let queue_pad = queue.get_static_pad("sink").unwrap();
-                gst::GhostPad::new(Some(&format!("{}_{}", name, "sink")), &queue_pad).unwrap()
+                queue.get_static_pad("sink").unwrap()
             })
             .collect::<Vec<_>>();
 
@@ -85,12 +78,13 @@ where
                 move |values| {
                     let webrtcbin = values[0].get::<gst::Element>().unwrap().unwrap();
 
-                    let promise = gst::Promise::new_with_change_func({
+                    let promise = gst::Promise::with_change_func({
                         let tx = tx.clone();
                         let webrtcbin = webrtcbin.clone();
                         move |reply| {
-                            let reply = reply.unwrap();
                             let offer = reply
+                                .unwrap()
+                                .unwrap()
                                 .get_value("offer")
                                 .unwrap()
                                 .get::<gst_webrtc::WebRTCSessionDescription>()
@@ -231,13 +225,14 @@ where
                                         }
                                     }
 
-                                    let promise = gst::Promise::new_with_change_func({
+                                    let promise = gst::Promise::with_change_func({
                                         let tx = tx.clone();
                                         let webrtcbin = webrtcbin.clone();
                                         let bin = bin.clone();
                                         move |reply| {
-                                            let reply = reply.unwrap();
                                             let answer = reply
+                                                .unwrap()
+                                                .unwrap()
                                                 .get_value("answer")
                                                 .unwrap()
                                                 .get::<gst_webrtc::WebRTCSessionDescription>()
@@ -291,16 +286,22 @@ where
         .await
 }
 
-pub fn server() -> Result<(), Error> {
-    let mut rt = runtime::Builder::new().enable_all().build()?;
+pub fn main() -> Result<(), Error> {
     gst::init().unwrap();
+    let rt = runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
 
-    let ws_connection = std::net::TcpStream::connect(("::", 4000))?;
-    let ws_connection = rt.enter(|| tokio::net::TcpStream::from_std(ws_connection))?;
-    let ws_connection = tokio_tungstenite::client_async("ws://localhost:4000", ws_connection)
+    let connection = std::net::TcpStream::connect(("::", 4000))?;
+    let connection = {
+        let _guard = rt.enter();
+        tokio::net::TcpStream::from_std(connection)?
+    };
+
+    let connection = tokio_tungstenite::client_async("ws://localhost:4000", connection)
         .map_ok(|(s, _)| s)
-        .err_into();
+        .err_into()
+        .and_then(handle_messages);
 
-    let result = ws_connection.and_then(handle_messages);
-    rt.block_on(result)
+    rt.block_on(connection)
 }

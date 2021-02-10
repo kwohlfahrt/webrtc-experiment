@@ -1,21 +1,20 @@
 [package]
-name = "breakout"
+name = "webrtc"
 version = "0.1.0"
 authors = ["Kai Wohlfahrt <kai.wohlfahrt@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-tokio = { version = "0.2.16", features = [ "tcp", "stream" ] }
-tokio-tls = "0.3.0"
-tokio-util = "0.3.1"
-tungstenite = "0.10.1"
-tokio-tungstenite = "0.10.1"
+tokio = { version = "1", features = [ "rt", "net" ] }
+tokio-stream = { version = "0.1", features = [ "net" ] }
+tungstenite = { version = "0.13", default-features = false }
+tokio-tungstenite = "0.13"
 futures = "0.3"
-serde = { version = "1.0", features = [ "derive" ] }
-serde_json = "1.0"
-gstreamer = "0.15"
-gstreamer-webrtc = "0.15"
-gstreamer-sdp = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+gstreamer = "0.16"
+gstreamer-webrtc = "0.16"
+gstreamer-sdp = "0.16"
 
 [lib]
 path = "src/lib.rs"

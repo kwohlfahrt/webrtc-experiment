@@ -1,6 +1,3 @@
-extern crate serde;
-extern crate serde_json;
-
 use serde::{Deserialize, Serialize};
 
 // TODO: use RawValue for efficiency on pass-through data
