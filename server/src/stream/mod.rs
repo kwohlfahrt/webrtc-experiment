@@ -64,7 +64,9 @@ where
                 bin.add(&queue).unwrap();
                 queue.link(&webrtcbin).unwrap();
 
-                queue.get_static_pad("sink").unwrap()
+                let queue_pad = queue.get_static_pad("sink").unwrap();
+                gst::GhostPad::with_target(Some(&format!("{}_{}", name, "sink")), &queue_pad)
+                    .unwrap()
             })
             .collect::<Vec<_>>();
 
