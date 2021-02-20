@@ -1,7 +1,57 @@
-body>div {
-    display: flex;
+.caption {
+  text-align: center;
 }
 
-.caption {
-    text-align: center;
+.videoContainer .profile {
+  width: 200px;
+  height: 200px;
+  transform: translate(-25px, -25px) scaleX(-1);
+}
+
+.videoContainer > video {
+  width: 200px;
+  height: 200px;
+  position: absolute;
+  transform: scaleX(-1);
+}
+
+.videoContainer > div {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.videoContainer {
+  width: 150px;
+  height: 150px;
+  border-radius: 100px;
+  overflow: hidden;
+  position: absolute;
+  border: 2px solid black;
+  background: white;
+}
+
+.videoContainer.self {
+  border: 2px solid green;
+}
+
+.room {
+  overflow: hidden;
+  position: absolute;
+}
+
+svg {
+  border: 1px solid red;
+}
+
+svg line {
+  stroke: black;
+  stroke-width: 3px;
+  transform: translate(75px, 75px);
+}
+
+button {
+  display: block;
 }

@@ -8,7 +8,7 @@ const PUBLIC = "";
 
 module.exports = ({ slow, standalone }, { mode }) => ({
   entry: {
-    main: ["./src/index.ts", "./src/style.css"],
+    main: ["./src/index.tsx", "./src/style.css"],
   },
   devtool: "source-map",
   devServer: {

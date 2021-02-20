@@ -1,40 +1,9 @@
-type ServerMessage =
-  | {
-      type: "Hello";
-      id: number;
-      peers: number[];
-    }
-  | {
-      type: "AddPeer";
-      peer: number;
-    }
-  | {
-      type: "RemovePeer";
-      peer: number;
-    }
-  | {
-      type: "PeerMessage";
-      message: ClientMessage;
-    };
+import * as ReactDOM from "react-dom";
+import App from "./App";
 
-type ClientMessage = {
-  peer: number;
-} & (
-  | {
-      type: "ICECandidate";
-      data: RTCIceCandidateInit;
-    }
-  | {
-      type: "SDP";
-      data: RTCSessionDescriptionInit;
-    }
-);
+ReactDOM.render(<App />, document.getElementById("root"));
 
-interface Peer {
-  element: HTMLElement;
-  connection: RTCPeerConnection;
-}
-
+/*
 async function call(
   server: string,
   callButton: HTMLButtonElement,
@@ -191,3 +160,4 @@ function main() {
 }
 
 document.addEventListener("DOMContentLoaded", main);
+*/
