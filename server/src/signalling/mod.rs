@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::marker::Unpin;
 use std::sync::{Arc, Mutex};
 
-use futures::future;
+use futures::{future, TryFutureExt};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStreamExt};
 use tokio::runtime;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -103,18 +103,11 @@ pub fn main() -> Result<(), Error> {
 
     let clients = Arc::new(Mutex::new(HashMap::new()));
 
-    let listener = std::net::TcpListener::bind(("::", 4000))?;
-    listener.set_nonblocking(true)?;
-
-    let listener = {
-        let _guard = rt.enter();
-        tokio::net::TcpListener::from_std(listener)?
-    };
-
-    let listener = TcpListenerStream::new(listener)
+    let listener = tokio::net::TcpListener::bind(("::", 4000))
+        .map_ok(TcpListenerStream::new)
+        .try_flatten_stream()
         .err_into()
-        .and_then(|s| tokio_tungstenite::accept_async(s))
-        .err_into()
+        .and_then(|s| tokio_tungstenite::accept_async(s).err_into())
         .enumerate()
         .map(|(id, s)| {
             s.map(|s| {
