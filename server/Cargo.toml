@@ -15,6 +15,7 @@ serde_json = "1"
 gstreamer = "0.16"
 gstreamer-webrtc = "0.16"
 gstreamer-sdp = "0.16"
+rand = "0.8"
 
 [lib]
 path = "src/lib.rs"

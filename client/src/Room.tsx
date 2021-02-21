@@ -4,14 +4,6 @@ import { useMedia } from "./Video";
 import { useCall, Peer } from "./ws";
 import { Pos, distance, useMap } from "./util";
 
-const positions = [
-  { x: 10, y: 10 },
-  { x: 500, y: 500 },
-  { x: 350, y: 30 },
-];
-
-const selfPos = { x: 250, y: 170 };
-
 const size = {
   width: 800,
   height: 600,
@@ -19,15 +11,18 @@ const size = {
 
 const Room = () => {
   const media = useMedia();
-  const [peers, addPeer, removePeer] = useMap<number, Peer>();
-  useCall(addPeer, removePeer, media);
+  const [self, peers] = useCall(media);
 
-  const videos = positions.map((pos, idx) => (
+  if (self == null) {
+    return <div>Loading</div>;
+  }
+
+  const videos = peers.map(({ id, pos, stream }) => (
     <Video
-      key={idx}
+      key={id}
       pos={pos}
-      distance={distance(selfPos, pos)}
-      media={media}
+      distance={distance(self.pos, pos)}
+      media={stream}
     />
   ));
 
@@ -36,12 +31,12 @@ const Room = () => {
     height: `${size.height}px`,
   };
 
-  const lines = positions.map((pos, idx) => (
+  const lines = peers.map(({ id, pos }) => (
     <line
-      opacity={distance(pos, selfPos) < 400 ? 1 : 0}
-      key={idx}
-      x1={selfPos.x}
-      y1={selfPos.y}
+      opacity={distance(pos, self.pos) < 400 ? 1 : 0}
+      key={id}
+      x1={self.pos.x}
+      y1={self.pos.y}
       x2={pos.x}
       y2={pos.y}
     />
@@ -51,7 +46,7 @@ const Room = () => {
     <div>
       <div style={style} className="room">
         {videos}
-        <Video pos={selfPos} media={media} />
+        <Video pos={self.pos} media={media} />
       </div>
       <svg style={style} viewBox={`0 0 ${size.width} ${size.height}`}>
         {lines}

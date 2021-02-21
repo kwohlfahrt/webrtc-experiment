@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useMap, Pos } from "./util";
 
 type PeerMessage = {
   peer: number;
@@ -16,12 +17,12 @@ type PeerMessage = {
 type ServerMessage =
   | {
       type: "Hello";
-      id: number;
-      peers: number[];
+      state: { id: number } & PeerState;
+      peers: ({ id: number } & PeerState)[];
     }
   | {
       type: "AddPeer";
-      peer: number;
+      peer: { id: number } & PeerState;
     }
   | {
       type: "RemovePeer";
@@ -32,47 +33,48 @@ type ServerMessage =
       message: PeerMessage;
     };
 
-export interface Peer {
-  connection: RTCPeerConnection;
+interface PeerState {
+  pos: Pos;
 }
 
-const useWebSocket = (
-  server: string,
-  handler: (msg: ServerMessage) => void,
+interface PeerConnection extends PeerState {
+  connection: RTCPeerConnection;
+  streams: readonly MediaStream[];
+}
+
+export interface Peer extends PeerState {
+  stream: MediaStream;
+}
+
+const call = (
+  media: MediaStream,
+  selfCb: (id: number, state: Peer) => void,
+  peerCb: (id: number, state: Peer | null) => void,
 ) => {
-  const ws = new WebSocket(`ws://${server}`);
-  ws.addEventListener("message", ({ data }) => {
-    handler(JSON.parse(data) as ServerMessage);
-  });
+  const ws = new WebSocket("ws://localhost:4000");
+  const connections = new Map<number, PeerConnection>();
+  const send = (msg: PeerMessage) => ws.send(JSON.stringify(msg));
 
-  useEffect(() => () => ws.close());
+  let self: number | null = null;
 
-  return {
-    send(msg: PeerMessage) {
-      ws.send(JSON.stringify(msg));
-    },
-  };
-};
-
-export const useCall = (
-  addPeerCb: (id: number, peer: Peer) => void,
-  removePeerCb: (id: number) => void,
-  media: MediaStream | null,
-) => {
-  const addPeer = (id: number, polite: boolean) => {
+  const addPeer = (
+    { id, ...state }: { id: number } & PeerState,
+    polite: boolean,
+  ) => {
     const connection = new RTCPeerConnection();
 
     connection.addEventListener("icecandidate", ({ candidate }) => {
       if (candidate) {
-        ws.send({ type: "ICECandidate", peer: id, data: candidate });
+        send({ type: "ICECandidate", peer: id, data: candidate });
       }
     });
     connection.addEventListener("track", ({ streams }) => {
-      //streams.forEach((stream) => (video.srcObject = stream));
+      connections.set(id, { ...state, connection, streams });
+      peerCb(id, { ...state, stream: streams[0] });
     });
     connection.addEventListener("negotiationneeded", async () => {
       await connection.setLocalDescription(await connection.createOffer());
-      ws.send({
+      send({
         type: "SDP",
         peer: id,
         data: connection.localDescription!,
@@ -83,25 +85,34 @@ export const useCall = (
       media.getTracks().forEach((track) => connection.addTrack(track, media));
     }
 
-    addPeerCb(id, { connection });
+    connections.set(id, { ...state, connection, streams: [] });
   };
 
+  const removePeer = (id: number) => {
+    const { connection } = connections.get(id)!;
+    connection.close();
+    connections.delete(id);
+    peerCb(id, null);
+  };
 
-  const handleMessage = async (msg: ServerMessage) => {
-  /*
+  const handler = async (msg: ServerMessage) => {
     if (msg.type == "Hello") {
-      const { id, peers } = data;
+      const {
+        state: { id, ...state },
+        peers,
+      } = msg;
+      self = id;
+      selfCb(id, { ...state, stream: media });
       peers.forEach((p) => addPeer(p, true));
     } else if (msg.type == "AddPeer") {
-      const { peer } = data;
+      const { peer } = msg;
       addPeer(peer, false);
     } else if (msg.type == "RemovePeer") {
-      const { peer } = data;
-      peer.connection.close();
+      const { peer } = msg;
       removePeer(peer);
     } else if (msg.type == "PeerMessage") {
       const { peer } = msg.message;
-      const { connection } = $$$;
+      const { connection } = connections.get(peer)!;
       if (msg.message.type == "ICECandidate") {
         await connection.addIceCandidate(msg.message.data);
       } else if (msg.message.type == "SDP") {
@@ -110,11 +121,12 @@ export const useCall = (
           await connection.setRemoteDescription(sdp);
         } else if (sdp.type == "offer") {
           await connection.setRemoteDescription(sdp);
-          media
+          // Never null, because listener is not added in that condition
+          media!
             .getTracks()
-            .forEach((track) => connection.addTrack(track, media));
+            .forEach((track) => connection.addTrack(track, media!));
           await connection.setLocalDescription(await connection.createAnswer());
-          sendMessage({
+          send({
             type: "SDP",
             peer,
             data: connection.localDescription!,
@@ -122,8 +134,40 @@ export const useCall = (
         }
       }
     }
-  */
   };
 
-  const ws = useWebSocket("localhost:4000", handleMessage);
+  ws.addEventListener("message", ({ data }) =>
+    handler(JSON.parse(data) as ServerMessage),
+  );
+
+  return ws;
+};
+
+export const useCall = (
+  media: MediaStream | null,
+): [Peer | null, (Peer & { id: number })[]] => {
+  const [peers, updatePeers] = useMap<number, Peer>();
+  const [self, setSelf] = useState<Peer | null>(null);
+
+  const selfCb = useCallback((id: number, state: Peer) => setSelf(state), [
+    setSelf,
+  ]);
+  const peerCb = useCallback(
+    (id: number, state: Peer | null) => {
+      if (state == null) {
+        updatePeers.remove(id);
+      } else {
+        updatePeers.insert(id, state);
+      }
+    },
+    [updatePeers.remove, updatePeers.insert],
+  );
+
+  useEffect(() => {
+    if (media == null) return;
+    const ws = call(media, selfCb, peerCb);
+    return () => ws.close();
+  }, [media, peerCb]);
+
+  return [self, Array.from(peers.entries(), ([id, peer]) => ({ id, ...peer }))];
 };

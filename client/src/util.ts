@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 
 export interface Pos {
   x: number;
@@ -14,21 +14,22 @@ export const distance = (a: Pos, b: Pos): number => {
 
 export const useMap = <K, V>(): [
   Map<K, V>,
-  (k: K, v: V) => void,
-  (k: K) => void,
+  { insert: (k: K, v: V) => void; remove: (k: K) => void },
 ] => {
   const [state, setState] = useState<Map<K, V>>(new Map());
-  const insert = useCallback((k, v) => setState(new Map([...state, [k, v]])), [
-    state,
-  ]);
-  const remove = useCallback(
-    (k) => {
-      const newState = new Map(state);
-      newState.delete(k);
-      setState(newState);
-    },
-    [state],
+
+  const insert = useCallback(
+    (k, v) => setState((state) => new Map([...state, [k, v]])),
+    [],
   );
 
-  return [state, insert, remove];
+  const remove = useCallback((k) => {
+    setState((state) => {
+      const newState = new Map(state);
+      newState.delete(k);
+      return newState;
+    });
+  }, []);
+
+  return [state, { insert, remove }];
 };

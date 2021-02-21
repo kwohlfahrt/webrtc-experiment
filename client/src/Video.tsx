@@ -21,7 +21,7 @@ export const useMedia = () => {
       setMedia(null);
       p.then((media) => media.getTracks().forEach((t) => t.stop()));
     };
-  });
+  }, []);
 
   return media;
 };
