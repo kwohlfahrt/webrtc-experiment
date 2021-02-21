@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import Video from "./Video";
 import { useMedia } from "./Video";
 import { useCall, Peer } from "./ws";
-import { Pos, distance, useMap } from "./util";
+import { Pos, factor, useMap } from "./util";
 
 const size = {
   width: 800,
@@ -23,7 +23,7 @@ const Room = () => {
     <Video
       key={id}
       pos={pos}
-      distance={distance(self.pos, pos)}
+      factor={factor(self.pos, pos)}
       media={stream}
     />
   ));
@@ -35,12 +35,12 @@ const Room = () => {
 
   const lines = peers.map(({ id, pos }) => (
     <line
-      opacity={distance(pos, self.pos) < 400 ? 1 : 0}
+      opacity={factor(self.pos, pos)}
       key={id}
-      x1={self.pos.x}
-      y1={self.pos.y}
-      x2={pos.x}
-      y2={pos.y}
+      x1={self.pos.x - 80}
+      y1={self.pos.y - 80}
+      x2={pos.x - 80}
+      y2={pos.y - 80}
     />
   ));
 

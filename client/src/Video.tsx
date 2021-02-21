@@ -3,7 +3,7 @@ import { Pos } from "./util";
 
 interface Props {
   pos: Pos;
-  distance?: number;
+  factor?: number;
   media: MediaStream | null;
 }
 
@@ -26,12 +26,20 @@ export const useMedia = () => {
   return media;
 };
 
-export default ({ pos, distance, media }: Props) => {
+export default ({ pos, factor, media }: Props) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const volume = factor ?? 0;
 
   useEffect(() => {
-    if (videoRef.current != null) videoRef.current.srcObject = media;
+    if (videoRef.current != null) {
+      videoRef.current.srcObject = media;
+      videoRef.current.play();
+    }
   }, [videoRef.current]);
+
+  useEffect(() => {
+    if (videoRef.current != null) videoRef.current.volume = volume;
+  }, [videoRef.current, volume]);
 
   const containerStyle = { left: `${pos.x - 80}px`, top: `${pos.y - 80}px` };
   const videoStyle = {
@@ -40,16 +48,17 @@ export default ({ pos, distance, media }: Props) => {
     opacity: 1,
   };
   const classes = ["videoContainer"];
-  if (distance == null) {
+  if (factor == null) {
     classes.push("self");
   } else {
-    videoStyle.opacity = Math.min(1, Math.max(0, 1 - (distance - 200) / 200));
+    videoStyle.opacity = factor;
   }
+
 
   return (
     <div style={containerStyle} className={classes.join(" ")}>
-      {distance ?? 0 < 400 ? (
-        <video style={videoStyle} autoPlay ref={videoRef} />
+      {(volume > 0 || factor == null) ? (
+        <video style={videoStyle} ref={videoRef} />
       ) : (
         <div>Profile Pic</div>
       )}

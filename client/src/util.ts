@@ -5,12 +5,17 @@ export interface Pos {
   y: number;
 }
 
-export const distance = (a: Pos, b: Pos): number => {
+const distance = (a: Pos, b: Pos): number => {
   const x = a.x - b.x;
   const y = a.y - b.y;
 
   return Math.sqrt(x * x + y * y);
 };
+
+export const factor = (a: Pos, b: Pos): number => {
+  const dist = distance(a, b);
+  return 1 - Math.min(1, Math.max(0, dist - 200) / 400)
+}
 
 export const useMap = <K, V>(): [
   Map<K, V>,
