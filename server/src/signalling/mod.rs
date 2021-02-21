@@ -68,10 +68,27 @@ where
     while let Some(Ok(msg)) = s.next().await {
         match msg {
             tungstenite::Message::Text(content) => {
-                let msg = serde_json::from_str::<ClientMessage>(&content)?;
-                if let Some(peer) = peers.lock()?.get_mut(&msg.peer) {
-                    let msg = tungstenite::Message::Text(serde_json::to_string(&msg.forward(id))?);
-                    peer.sink.send(msg).await?;
+                match serde_json::from_str::<ClientMessage>(&content)? {
+                    ClientMessage::Peer { message: msg } => {
+                        if let Some(peer) = peers.lock()?.get_mut(&msg.peer) {
+                            let msg = tungstenite::Message::Text(serde_json::to_string(
+                                &msg.forward(id),
+                            )?);
+                            peer.sink.send(msg).await?;
+                        }
+                    }
+                    ClientMessage::Move { pos } => {
+                        let msg = tungstenite::Message::Text(serde_json::to_string(
+                            &ServerMessage::MovePeer { peer: id, pos },
+                        )?);
+                        future::join_all(
+                            peers
+                                .lock()?
+                                .iter_mut()
+                                .map(|(_, peer)| peer.sink.send(msg.clone())),
+                        )
+                        .await;
+                    }
                 }
             }
             tungstenite::Message::Close(_) => {

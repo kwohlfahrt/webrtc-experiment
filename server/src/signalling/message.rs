@@ -2,16 +2,16 @@ use serde::{Deserialize, Serialize};
 
 // TODO: use RawValue for efficiency on pass-through data
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ClientMessage {
+pub struct PeerMessage {
     pub peer: usize,
     #[serde(flatten)]
-    pub data: ClientMessageData,
+    pub data: PeerMessageData,
 }
 
-impl ClientMessage {
+impl PeerMessage {
     pub fn forward(self, source: usize) -> ServerMessage {
         ServerMessage::PeerMessage {
-            message: ClientMessage {
+            message: PeerMessage {
                 peer: source,
                 ..self
             },
@@ -21,7 +21,7 @@ impl ClientMessage {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum ClientMessageData {
+pub enum PeerMessageData {
     ICECandidate { data: serde_json::Value },
     SDP { data: serde_json::Value },
 }
@@ -32,7 +32,15 @@ pub enum ServerMessage {
     Hello { state: Peer, peers: Vec<Peer> },
     AddPeer { peer: Peer },
     RemovePeer { peer: usize },
-    PeerMessage { message: ClientMessage },
+    MovePeer { peer: usize, pos: Pos },
+    PeerMessage { message: PeerMessage },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ClientMessage {
+    Peer { message: PeerMessage },
+    Move { pos: Pos },
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Copy, Clone)]

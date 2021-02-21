@@ -11,11 +11,13 @@ const size = {
 
 const Room = () => {
   const media = useMedia();
-  const [self, peers] = useCall(media);
+  const [selfs, peers] = useCall(media);
 
-  if (self == null) {
+  if (selfs == null) {
     return <div>Loading</div>;
   }
+
+  const [self, setPos] = selfs;
 
   const videos = peers.map(({ id, pos, stream }) => (
     <Video
@@ -42,9 +44,16 @@ const Room = () => {
     />
   ));
 
+  const handleClick = (e: React.MouseEvent<HTMLElement>) => {
+    setPos({
+      x: e.clientX - e.currentTarget.clientLeft,
+      y: e.clientY - e.currentTarget.clientTop,
+    });
+  };
+
   return (
     <div>
-      <div style={style} className="room">
+      <div style={style} className="room" onClick={handleClick}>
         {videos}
         <Video pos={self.pos} media={media} />
       </div>

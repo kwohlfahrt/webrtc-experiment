@@ -29,15 +29,30 @@ type ServerMessage =
       peer: number;
     }
   | {
+      type: "MovePeer";
+      peer: number;
+      pos: Pos;
+    }
+  | {
       type: "PeerMessage";
       message: PeerMessage;
+    };
+
+type ClientMessage =
+  | {
+      type: "Peer";
+      message: PeerMessage;
+    }
+  | {
+      type: "Move";
+      pos: Pos;
     };
 
 interface PeerState {
   pos: Pos;
 }
 
-interface PeerConnection extends PeerState {
+interface PeerConnection {
   connection: RTCPeerConnection;
   streams: readonly MediaStream[];
 }
@@ -53,7 +68,7 @@ const call = (
 ) => {
   const ws = new WebSocket(`ws://${HOST}/signalling`);
   const connections = new Map<number, PeerConnection>();
-  const send = (msg: PeerMessage) => ws.send(JSON.stringify(msg));
+  const send = (msg: ClientMessage) => ws.send(JSON.stringify(msg));
 
   let self: number | null = null;
 
@@ -65,7 +80,10 @@ const call = (
 
     connection.addEventListener("icecandidate", ({ candidate }) => {
       if (candidate) {
-        send({ type: "ICECandidate", peer: id, data: candidate });
+        send({
+          type: "Peer",
+          message: { type: "ICECandidate", peer: id, data: candidate },
+        });
       }
     });
     connection.addEventListener("track", ({ streams }) => {
@@ -75,13 +93,16 @@ const call = (
     connection.addEventListener("negotiationneeded", async () => {
       await connection.setLocalDescription(await connection.createOffer());
       send({
-        type: "SDP",
-        peer: id,
-        data: connection.localDescription!,
+        type: "Peer",
+        message: {
+          type: "SDP",
+          peer: id,
+          data: connection.localDescription!,
+        },
       });
     });
 
-    if (!polite && media != null) {
+    if (!polite) {
       media.getTracks().forEach((track) => connection.addTrack(track, media));
     }
 
@@ -110,6 +131,14 @@ const call = (
     } else if (msg.type == "RemovePeer") {
       const { peer } = msg;
       removePeer(peer);
+    } else if (msg.type == "MovePeer") {
+      const { peer, pos } = msg;
+      if (peer == self) {
+        selfCb(peer, { pos, stream: media });
+      } else {
+        const { streams } = connections.get(peer)!;
+        peerCb(peer, { pos, stream: streams[0] });
+      }
     } else if (msg.type == "PeerMessage") {
       const { peer } = msg.message;
       const { connection } = connections.get(peer)!;
@@ -121,15 +150,17 @@ const call = (
           await connection.setRemoteDescription(sdp);
         } else if (sdp.type == "offer") {
           await connection.setRemoteDescription(sdp);
-          // Never null, because listener is not added in that condition
-          media!
+          media
             .getTracks()
-            .forEach((track) => connection.addTrack(track, media!));
+            .forEach((track) => connection.addTrack(track, media));
           await connection.setLocalDescription(await connection.createAnswer());
           send({
-            type: "SDP",
-            peer,
-            data: connection.localDescription!,
+            type: "Peer",
+            message: {
+              type: "SDP",
+              peer,
+              data: connection.localDescription!,
+            },
           });
         }
       }
@@ -145,9 +176,12 @@ const call = (
 
 export const useCall = (
   media: MediaStream | null,
-): [Peer | null, (Peer & { id: number })[]] => {
+): [[Peer, (pos: Pos) => void] | null, (Peer & { id: number })[]] => {
   const [peers, updatePeers] = useMap<number, Peer>();
   const [self, setSelf] = useState<Peer | null>(null);
+  const [pos, setPos] = useState<Pos>({ x: 0, y: 0 });
+
+  const sendRef = useRef<(msg: ClientMessage) => void>(() => {});
 
   const selfCb = useCallback((id: number, state: Peer) => setSelf(state), [
     setSelf,
@@ -166,8 +200,16 @@ export const useCall = (
   useEffect(() => {
     if (media == null) return;
     const ws = call(media, selfCb, peerCb);
+    sendRef.current = (msg) => ws.send(JSON.stringify(msg));
     return () => ws.close();
-  }, [media, peerCb]);
+  }, [media, selfCb, peerCb]);
 
-  return [self, Array.from(peers.entries(), ([id, peer]) => ({ id, ...peer }))];
+  useEffect(() => {
+    sendRef.current({ type: "Move", pos });
+  }, [pos]);
+
+  return [
+    self != null ? [self, setPos] : null,
+    Array.from(peers.entries(), ([id, peer]) => ({ id, ...peer })),
+  ];
 };

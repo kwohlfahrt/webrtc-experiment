@@ -19,7 +19,7 @@ use serde_json::json;
 use tokio::runtime;
 use tokio_tungstenite::tungstenite;
 
-use crate::signalling::message::{ClientMessage, ClientMessageData, ServerMessage};
+use crate::signalling::message::{PeerMessage, PeerMessageData, ServerMessage};
 
 pub use error::Error;
 
@@ -32,7 +32,7 @@ where
         + 'static,
 {
     let mut peers: HashMap<usize, _> = HashMap::new();
-    let (tx, rx) = mpsc::unbounded::<ClientMessage>();
+    let (tx, rx) = mpsc::unbounded::<PeerMessage>();
 
     let pipeline = gst::Pipeline::new(Some("pipeline"));
     let tees = pipeline::add_src(&pipeline, false);
@@ -97,9 +97,9 @@ where
                                 .emit("set-local-description", &[&offer, &None::<gst::Promise>])
                                 .unwrap();
 
-                            tx.unbounded_send(ClientMessage {
+                            tx.unbounded_send(PeerMessage {
                                 peer,
-                                data: ClientMessageData::SDP {
+                                data: PeerMessageData::SDP {
                                     data: json!({
                                         "type": "offer",
                                         "sdp": offer.get_sdp().as_text().unwrap(),
@@ -125,9 +125,9 @@ where
                     let media_index = values[1].get_some::<u32>().unwrap();
                     let candidate = values[2].get::<String>().unwrap().unwrap();
 
-                    tx.unbounded_send(ClientMessage {
+                    tx.unbounded_send(PeerMessage {
                         peer,
-                        data: ClientMessageData::ICECandidate {
+                        data: PeerMessageData::ICECandidate {
                             data: json!({
                                 "sdpMLineIndex": media_index,
                                 "candidate": candidate,
@@ -174,9 +174,9 @@ where
                             peers.remove(&peer);
                         }
                         ServerMessage::PeerMessage {
-                            message: ClientMessage { peer, data },
+                            message: PeerMessage { peer, data },
                         } => match data {
-                            ClientMessageData::ICECandidate { data } => {
+                            PeerMessageData::ICECandidate { data } => {
                                 let (webrtcbin, _, _, _) = &peers[&peer];
                                 let mline_index = data["sdpMLineIndex"].as_u64().unwrap() as u32;
                                 let candidate = &data["candidate"].as_str().unwrap();
@@ -186,7 +186,7 @@ where
                                         .unwrap();
                                 }
                             }
-                            ClientMessageData::SDP { data } => {
+                            PeerMessageData::SDP { data } => {
                                 let sdp_type = data["type"].as_str().unwrap();
                                 if sdp_type == "answer" {
                                     let (webrtcbin, bin, _, _) = &peers[&peer];
@@ -248,9 +248,9 @@ where
                                                 )
                                                 .unwrap();
                                             bin.sync_state_with_parent().unwrap();
-                                            tx.unbounded_send(ClientMessage {
+                                            tx.unbounded_send(PeerMessage {
                                                 peer,
-                                                data: ClientMessageData::SDP {
+                                                data: PeerMessageData::SDP {
                                                     data: json!({
                                                         "type": "answer",
                                                         "sdp": answer.get_sdp().as_text().unwrap(),
@@ -269,6 +269,7 @@ where
                                 }
                             }
                         },
+                        ServerMessage::MovePeer { .. } => {}
                     };
                 }
                 _ => {}

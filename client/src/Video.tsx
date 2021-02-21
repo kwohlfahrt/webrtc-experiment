@@ -33,7 +33,7 @@ export default ({ pos, distance, media }: Props) => {
     if (videoRef.current != null) videoRef.current.srcObject = media;
   }, [videoRef.current]);
 
-  const containerStyle = { left: `${pos.x}px`, top: `${pos.y}px` };
+  const containerStyle = { left: `${pos.x - 80}px`, top: `${pos.y - 80}px` };
   const videoStyle = {
     left: "-25px",
     top: "-25px",
