@@ -51,7 +51,7 @@ const call = (
   selfCb: (id: number, state: Peer) => void,
   peerCb: (id: number, state: Peer | null) => void,
 ) => {
-  const ws = new WebSocket("ws://localhost:4000");
+  const ws = new WebSocket(`ws://${HOST}/signalling`);
   const connections = new Map<number, PeerConnection>();
   const send = (msg: PeerMessage) => ws.send(JSON.stringify(msg));
 

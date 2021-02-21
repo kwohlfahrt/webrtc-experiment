@@ -4,6 +4,7 @@ const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const { CleanWebpackPlugin } = require("clean-webpack-plugin");
 const { DefinePlugin } = require("webpack");
 
+const HOST = "localhost:8080";
 const PUBLIC = "";
 
 module.exports = ({ slow, standalone }, { mode }) => ({
@@ -13,9 +14,10 @@ module.exports = ({ slow, standalone }, { mode }) => ({
   devtool: "source-map",
   devServer: {
     proxy: {
-      [`${PUBLIC}/api/**`]: {
-        target: "http://localhost:4000",
-        pathRewrite: { [`^${PUBLIC}/api`]: "" },
+      [`${PUBLIC}/signalling`]: {
+        target: "ws://localhost:4000",
+        pathRewrite: { [`^${PUBLIC}/signalling`]: "" },
+        ws: true,
       },
     },
     publicPath: PUBLIC + "/",
@@ -46,9 +48,8 @@ module.exports = ({ slow, standalone }, { mode }) => ({
       template: "src/index.html",
     }),
     new DefinePlugin({
-      SLOW: JSON.stringify(slow ?? false),
-      STANDALONE: JSON.stringify(standalone ?? false),
       PUBLIC: JSON.stringify(PUBLIC),
+      HOST: JSON.stringify(HOST),
     }),
   ],
   output: {
