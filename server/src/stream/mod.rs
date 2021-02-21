@@ -164,11 +164,11 @@ where
                             ..
                         } => {
                             remote_peers.iter().for_each(|peer| {
-                                peers.insert(*peer, add_peer(*peer, true));
+                                peers.insert(peer.id, add_peer(peer.id, true));
                             });
                         }
                         ServerMessage::AddPeer { peer } => {
-                            peers.insert(peer, add_peer(peer, false));
+                            peers.insert(peer.id, add_peer(peer.id, false));
                         }
                         ServerMessage::RemovePeer { peer } => {
                             peers.remove(&peer);
