@@ -16,6 +16,7 @@ gstreamer = "0.16"
 gstreamer-webrtc = "0.16"
 gstreamer-sdp = "0.16"
 rand = "0.8"
+clap = "2"
 
 [lib]
 path = "src/lib.rs"

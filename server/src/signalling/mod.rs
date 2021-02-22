@@ -113,14 +113,14 @@ where
     Ok(())
 }
 
-pub fn main() -> Result<(), Error> {
+pub fn main(address: &str) -> Result<(), Error> {
     let rt = runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
 
     let clients = Arc::new(Mutex::new(HashMap::new()));
 
-    let listener = tokio::net::TcpListener::bind(("::", 4000))
+    let listener = tokio::net::TcpListener::bind(address)
         .map_ok(TcpListenerStream::new)
         .try_flatten_stream()
         .err_into()

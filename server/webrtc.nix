@@ -15,7 +15,7 @@ in rustPlatform.buildRustPackage rec {
     [ gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad ]
   );
 
-  cargoSha256 = "12bx1jsf4wp5wlbfwr0jxa245zniail70zvslj1q3jsgcvgzs2fd";
+  cargoSha256 = "1ar6223z494sgjdyjqcz9z8vaf5c83qfcw5wv40kif60hj6p2hxz";
 
   meta = with lib; {
     platforms = platforms.all;

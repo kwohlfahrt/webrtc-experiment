@@ -4,8 +4,7 @@ const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const { CleanWebpackPlugin } = require("clean-webpack-plugin");
 const { DefinePlugin } = require("webpack");
 
-const HOST = "localhost:8080";
-const PUBLIC = "";
+const PUBLIC = "webrtc";
 
 module.exports = ({ slow, standalone }, { mode }) => ({
   entry: {
@@ -14,13 +13,13 @@ module.exports = ({ slow, standalone }, { mode }) => ({
   devtool: "source-map",
   devServer: {
     proxy: {
-      [`${PUBLIC}/signalling`]: {
+      [`/${PUBLIC}/signalling`]: {
         target: "ws://localhost:4000",
-        pathRewrite: { [`^${PUBLIC}/signalling`]: "" },
+        pathRewrite: { [`^/${PUBLIC}/signalling`]: "" },
         ws: true,
       },
     },
-    publicPath: PUBLIC + "/",
+    publicPath: "/" + PUBLIC
   },
   module: {
     rules: [
@@ -49,7 +48,6 @@ module.exports = ({ slow, standalone }, { mode }) => ({
     }),
     new DefinePlugin({
       PUBLIC: JSON.stringify(PUBLIC),
-      HOST: JSON.stringify(HOST),
     }),
   ],
   output: {
