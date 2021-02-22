@@ -33,11 +33,11 @@ in {
       enable = true;
       virtualHosts.${cfg.virtualHost}.locations = {
         "/webrtc/signalling/".extraConfig = ''
-          proxy_pass ​http://${cfg.backend.address};
-          proxy_http_version 1.1;
-          proxy_set_header Upgrade $http_upgrade;
-          proxy_set_header Connection "upgrade";
-          proxy_read_timeout 86400;
+          proxy_pass http://${cfg.backend.address}/ ;
+          proxy_http_version 1.1 ;
+          proxy_set_header Upgrade $http_upgrade ;
+          proxy_set_header Connection "upgrade" ;
+          proxy_read_timeout 86400 ;
         '';
 
         "/webrtc/".extraConfig = ''

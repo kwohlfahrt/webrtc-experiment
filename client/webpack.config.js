@@ -52,6 +52,6 @@ module.exports = ({ slow, standalone }, { mode }) => ({
   ],
   output: {
     path: path.resolve(__dirname, "dist"),
-    publicPath: PUBLIC + "/",
+    publicPath: "/" + PUBLIC + "/",
   },
 });
