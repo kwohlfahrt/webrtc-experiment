@@ -41,8 +41,8 @@ impl Handler<Join> for Server {
         let state = message::Peer {
             id: self.clients.keys().max().map_or(1, |x| x + 1),
             pos: Pos {
-                x: random(),
-                y: random(),
+                x: random::<f32>() * 800.0,
+                y: random::<f32>() * 600.0,
             },
         };
 
@@ -95,11 +95,9 @@ impl Handler<Move> for Server {
     fn handle(&mut self, msg: Move, _: &mut Context<Self>) -> Self::Result {
         self.clients.entry(msg.id).and_modify(|e| e.pos = msg.pos);
 
-        for (&id, client) in self.clients.iter() {
-            if id != msg.id {
-                client.addr.do_send(msg)
-            }
-        }
+        for client in self.clients.values() {
+	    client.addr.do_send(msg)
+	}
     }
 }
 

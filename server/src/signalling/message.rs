@@ -37,6 +37,7 @@ pub enum ServerMessage {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum ClientMessage {
     Peer { message: PeerMessage },
     Move { pos: Pos },
