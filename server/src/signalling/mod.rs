@@ -13,7 +13,7 @@ use actix_web_actors::ws;
 use rand::random;
 
 pub use error::Error;
-use message::{ClientMessage, Pos};
+use message::{ClientMessage, ServerMessage, Pos};
 
 struct Server {
     clients: HashMap<usize, Client>,
@@ -29,7 +29,7 @@ impl Actor for Server {
 }
 
 #[derive(Message)]
-#[rtype(result = "Hello")]
+#[rtype(result = "(usize, message::ServerMessage)")]
 struct Join {
     addr: Addr<Ws>,
 }
@@ -46,7 +46,7 @@ impl Handler<Join> for Server {
             },
         };
 
-        let reply = Hello {
+        let reply = ServerMessage::Hello {
             state,
             peers: self.clients
                 .iter()
@@ -58,7 +58,7 @@ impl Handler<Join> for Server {
         };
 
         for client in self.clients.values() {
-            client.addr.do_send(AddPeer { peer: state })
+            client.addr.do_send(ServerMessage::AddPeer { peer: state })
         }
 
         self.clients.insert(
@@ -69,7 +69,7 @@ impl Handler<Join> for Server {
             },
         );
 
-        MessageResult(reply)
+        MessageResult((state.id, reply))
     }
 }
 
@@ -96,17 +96,8 @@ impl Handler<Move> for Server {
         self.clients.entry(msg.id).and_modify(|e| e.pos = msg.pos);
 
         for client in self.clients.values() {
-	    client.addr.do_send(msg)
+	    client.addr.do_send(msg.into())
 	}
-    }
-}
-
-impl Handler<Move> for Ws {
-    type Result = ();
-
-    fn handle(&mut self, msg: Move, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
-        let msg: message::ServerMessage = msg.into();
-        ctx.text(serde_json::to_string(&msg).unwrap());
     }
 }
 
@@ -122,17 +113,8 @@ impl Handler<PeerMessage> for Server {
 
     fn handle(&mut self, msg: PeerMessage, _: &mut Context<Self>) -> Self::Result {
 	if let Some(peer) = self.clients.get(&msg.msg.peer) {
-	    peer.addr.do_send(msg)
+	    peer.addr.do_send(msg.msg.forward(msg.source))
 	}
-    }
-}
-
-impl Handler<PeerMessage> for Ws {
-    type Result = ();
-
-    fn handle(&mut self, msg: PeerMessage, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
-	let msg = msg.msg.forward(msg.source);
-	ctx.text(serde_json::to_string(&msg).unwrap());
     }
 }
 
@@ -149,48 +131,8 @@ impl Handler<Quit> for Server {
         self.clients.remove(&msg.id);
 
         for client in self.clients.values() {
-            client.addr.do_send(RemovePeer { peer: msg.id })
+            client.addr.do_send(ServerMessage::RemovePeer { peer: msg.id })
         }
-    }
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-struct Hello {
-    state: message::Peer,
-    peers: Vec<message::Peer>,
-}
-
-impl std::convert::From<Hello> for message::ServerMessage {
-    fn from(msg: Hello) -> Self {
-        Self::Hello {
-            state: msg.state,
-            peers: msg.peers,
-        }
-    }
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-struct AddPeer {
-    peer: message::Peer,
-}
-
-impl std::convert::From<AddPeer> for message::ServerMessage {
-    fn from(msg: AddPeer) -> Self {
-        Self::AddPeer { peer: msg.peer }
-    }
-}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-struct RemovePeer {
-    peer: usize,
-}
-
-impl std::convert::From<RemovePeer> for message::ServerMessage {
-    fn from(msg: RemovePeer) -> Self {
-        Self::RemovePeer { peer: msg.peer }
     }
 }
 
@@ -210,10 +152,9 @@ impl Actor for Ws {
             .into_actor(self)
             .then(|hello, act, ctx| {
                 match hello {
-                    Ok(hello) => {
-                        act.id = hello.state.id;
-                        let msg: message::ServerMessage = hello.into();
-                        ctx.text(serde_json::to_string(&msg).unwrap())
+                    Ok((id, hello)) => {
+                        act.id = id;
+                        ctx.text(serde_json::to_string(&hello).unwrap())
                     }
                     _ => ctx.stop(),
                 }
@@ -228,21 +169,15 @@ impl Actor for Ws {
     }
 }
 
-impl Handler<AddPeer> for Ws {
+impl Message for ServerMessage {
     type Result = ();
-
-    fn handle(&mut self, msg: AddPeer, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
-        let msg: message::ServerMessage = msg.into();
-        ctx.text(serde_json::to_string(&msg).unwrap());
-    }
 }
 
-impl Handler<RemovePeer> for Ws {
+impl Handler<ServerMessage> for Ws {
     type Result = ();
 
-    fn handle(&mut self, msg: RemovePeer, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
-        let msg: message::ServerMessage = msg.into();
-        ctx.text(serde_json::to_string(&msg).unwrap());
+    fn handle(&mut self, msg: ServerMessage, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
+	ctx.text(serde_json::to_string(&msg).unwrap());
     }
 }
 
