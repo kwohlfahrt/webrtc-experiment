@@ -1,6 +1,30 @@
 mod error;
 mod pipeline;
 
+use crate::signalling::message;
+pub use error::Error;
+
+use futures::TryFutureExt;
+
+use actix::{
+    Actor, ActorContext, ActorFuture, Addr, AsyncContext, Context, ContextFutureSpawner, Handler,
+    Message, MessageResult, Running, StreamHandler, WrapFuture
+};
+use actix_web::{web, App, HttpRequest, HttpServer, Responder};
+use awc::ws;
+use awc::error::WsProtocolError;
+use awc::Client;
+use actix::io::SinkWrite;
+use futures::stream::{StreamExt};
+use futures::Sink;
+use std::collections::HashMap;
+
+use gstreamer as gst;
+use gst::{
+    ElementExt, ElementExtManual, GObjectExtManualGst, GstBinExt, GstBinExtManual, PadExt,
+    PadExtManual,
+};
+/*
 use std::collections::HashMap;
 use std::marker::{Send, Unpin};
 
@@ -8,20 +32,11 @@ use futures::channel::mpsc;
 use futures::future::{ok, try_select};
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use gst::prelude::{ObjectExt, ToValue};
-use gst::{
-    ElementExt, ElementExtManual, GObjectExtManualGst, GstBinExt, GstBinExtManual, PadExt,
-    PadExtManual,
-};
-use gstreamer as gst;
 use gstreamer_sdp as gst_sdp;
 use gstreamer_webrtc as gst_webrtc;
 use serde_json::json;
 use tokio::runtime;
 use tokio_tungstenite::tungstenite;
-
-use crate::signalling::message::{PeerMessage, PeerMessageData, ServerMessage};
-
-pub use error::Error;
 
 async fn handle_messages<S>(ws: S) -> Result<(), Error>
 where
@@ -289,25 +304,102 @@ where
         })
         .await
 }
+*/
 
-pub fn main() -> Result<(), Error> {
-    gst::init().unwrap();
-    let rt = runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
+struct Stream<S: Sink<ws::Message> + Unpin + 'static> {
+    peers: HashMap<usize, ()>,
+    ws: SinkWrite<ws::Message, S>,
+    pipeline: gst::Pipeline,
+}
 
-    let connection = std::net::TcpStream::connect(("::", 4000))?;
-    connection.set_nonblocking(true)?;
+impl<S: Sink<ws::Message> + Unpin + 'static> Stream<S> {
+    pub fn new(ws: SinkWrite<ws::Message, S>) -> Self {
+	let pipeline = gst::Pipeline::new(Some("pipeline"));
+	let tees = pipeline::add_src(&pipeline, false);
+	pipeline.set_state(gst::State::Playing).unwrap();
 
-    let connection = {
-        let _guard = rt.enter();
-        tokio::net::TcpStream::from_std(connection)?
-    };
+	Self {peers: HashMap::new(), ws, pipeline}
+    }
 
-    let connection = tokio_tungstenite::client_async("ws://localhost:4000", connection)
-        .map_ok(|(s, _)| s)
-        .err_into()
-        .and_then(handle_messages);
+    fn add_peer(peer: usize, polite: bool) {
+        let bin = gst::Bin::new(None);
+        let webrtcbin = gst::ElementFactory::find("webrtcbin")
+            .unwrap()
+            .create(Some("webrtcbin"))
+            .unwrap();
+        bin.add(&webrtcbin).unwrap();
 
-    rt.block_on(connection)
+        let tee_pads = tees
+            .iter()
+            .map(|(_, tee)| {
+                let template = tee.get_pad_template(&"src_%u").unwrap();
+                tee.request_pad(&template, None, None).unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        let bin_pads = tees
+            .iter()
+            .map(|(name, _)| {
+                let queue = gst::ElementFactory::find("queue")
+                    .unwrap()
+                    .create(Some(&format!("{}_{}", name, "queue")))
+                    .unwrap();
+                bin.add(&queue).unwrap();
+                queue.link(&webrtcbin).unwrap();
+
+                let queue_pad = queue.get_static_pad("sink").unwrap();
+                gst::GhostPad::with_target(Some(&format!("{}_{}", name, "sink")), &queue_pad)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+    }
+}
+
+
+impl<S: Sink<ws::Message> + Unpin + 'static> Actor for Stream<S> {
+    type Context = Context<Self>;
+
+    fn stopping(&mut self, _: &mut Self::Context) -> Running {
+        Running::Stop
+    }
+}
+
+impl<S: Sink<ws::Message> + Unpin + 'static> StreamHandler<Result<ws::Frame, WsProtocolError>> for Stream<S> {
+    fn handle(&mut self, msg: Result<ws::Frame, WsProtocolError>, ctx: &mut Self::Context) {
+        let msg = match msg {
+            Err(_) => {
+                ctx.stop();
+                return;
+            }
+	    Ok(ws::Frame::Close(reason)) => {
+		ctx.stop();
+		return;
+	    }
+            Ok(ws::Frame::Text(msg)) => msg,
+	    _ => return,
+        };
+
+
+	match serde_json::from_slice::<message::ServerMessage>(&msg).unwrap() {
+            _ => (),
+	}
+    }
+}
+
+impl<S: Sink<ws::Message> + Unpin + 'static> actix::io::WriteHandler<WsProtocolError> for Stream<S> {}
+
+pub async fn main(address: &str) -> Result<(), Error> {
+    let (response, conn) = Client::new()
+	.ws(address)
+	.connect()
+	.await
+	.unwrap();
+
+    let addr = Stream::create(|ctx| {
+	let (sink, stream) = conn.split();
+	Stream::add_stream(stream, ctx);
+	Stream::new(SinkWrite::new(sink, ctx))
+    });
+
+    Ok(())
 }

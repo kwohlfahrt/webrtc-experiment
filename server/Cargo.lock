@@ -2360,6 +2360,7 @@ dependencies = [
  "actix",
  "actix-web",
  "actix-web-actors",
+ "awc",
  "clap",
  "futures",
  "gstreamer",
