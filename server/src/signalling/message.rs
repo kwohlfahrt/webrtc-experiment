@@ -37,7 +37,6 @@ pub enum ServerMessage {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum ClientMessage {
     Peer { message: PeerMessage },
     Move { pos: Pos },
@@ -49,7 +48,7 @@ pub struct Pos {
     pub y: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 pub struct Peer {
     pub id: usize,
     pub pos: Pos,

@@ -2,144 +2,310 @@ mod error;
 pub mod message;
 
 use std::collections::HashMap;
-use std::marker::Unpin;
-use std::sync::{Arc, Mutex};
+use futures::TryFutureExt;
 
-use futures::{future, TryFutureExt};
-use futures::{Sink, SinkExt, Stream, StreamExt, TryStreamExt};
-use tokio::runtime;
-use tokio_stream::wrappers::TcpListenerStream;
-use tokio_tungstenite::tungstenite;
+use actix::{
+    Actor, ActorContext, ActorFuture, Addr, AsyncContext, Context, ContextFutureSpawner, Handler,
+    Message, MessageResult, Running, StreamHandler, WrapFuture,
+};
+use actix_web::{web, App, HttpRequest, HttpServer, Responder};
+use actix_web_actors::ws;
+use rand::random;
 
 pub use error::Error;
-use message::{ClientMessage, Pos, ServerMessage};
+use message::{ClientMessage, Pos};
 
-struct Peer<U> {
-    pos: Pos,
-    sink: U,
+struct Server {
+    clients: HashMap<usize, Client>,
 }
 
-async fn handle_client<U, S>(
-    mut s: S,
-    id: usize,
-    peers: &Arc<Mutex<HashMap<usize, Peer<U>>>>,
-) -> Result<(), Error>
-where
-    U: Sink<tungstenite::Message> + Unpin,
-    Error: From<U::Error>,
-    S: Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
-{
-    let pos = peers
-        .lock()?
-        .get(&id)
-        .map(|peer| peer.pos)
-        .unwrap_or_default();
+struct Client {
+    pos: Pos,
+    addr: Addr<Ws>,
+}
 
-    let msg = tungstenite::Message::Text(serde_json::to_string(&ServerMessage::Hello {
-        state: message::Peer { id, pos },
-        peers: peers
-            .lock()?
-            .iter()
-            .filter(|(&peer_id, _)| peer_id != id)
-            .map(|(id, peer)| message::Peer {
-                id: *id,
-                pos: peer.pos,
-            })
-            .collect(),
-    })?);
+impl Actor for Server {
+    type Context = Context<Self>;
+}
 
-    if let Some(peer) = peers.lock()?.get_mut(&id) {
-        peer.sink.send(msg).await?;
+#[derive(Message)]
+#[rtype(result = "Hello")]
+struct Join {
+    addr: Addr<Ws>,
+}
+
+impl Handler<Join> for Server {
+    type Result = MessageResult<Join>;
+
+    fn handle(&mut self, msg: Join, _: &mut Context<Self>) -> Self::Result {
+        let state = message::Peer {
+            id: self.clients.keys().max().map_or(1, |x| x + 1),
+            pos: Pos {
+                x: random(),
+                y: random(),
+            },
+        };
+
+        let reply = Hello {
+            state,
+            peers: self.clients
+                .iter()
+                .map(|(&id, client)| message::Peer {
+                    id,
+                    pos: client.pos,
+                })
+                .collect(),
+        };
+
+        for client in self.clients.values() {
+            client.addr.do_send(AddPeer { peer: state })
+        }
+
+        self.clients.insert(
+            state.id,
+            Client {
+                pos: state.pos,
+                addr: msg.addr,
+            },
+        );
+
+        MessageResult(reply)
     }
+}
 
-    let msg = tungstenite::Message::Text(serde_json::to_string(&ServerMessage::AddPeer {
-        peer: message::Peer { id, pos },
-    })?);
+#[derive(Message, Copy, Clone)]
+#[rtype(result = "()")]
+struct Move {
+    id: usize,
+    pos: Pos,
+}
 
-    future::join_all(
-        peers
-            .lock()?
-            .iter_mut()
-            .filter(|(&peer_id, _)| peer_id != id)
-            .map(|(_, peer)| peer.sink.send(msg.clone())),
-    )
-    .await;
-
-    while let Some(Ok(msg)) = s.next().await {
-        match msg {
-            tungstenite::Message::Text(content) => {
-                match serde_json::from_str::<ClientMessage>(&content)? {
-                    ClientMessage::Peer { message: msg } => {
-                        if let Some(peer) = peers.lock()?.get_mut(&msg.peer) {
-                            let msg = tungstenite::Message::Text(serde_json::to_string(
-                                &msg.forward(id),
-                            )?);
-                            peer.sink.send(msg).await?;
-                        }
-                    }
-                    ClientMessage::Move { pos } => {
-                        let msg = tungstenite::Message::Text(serde_json::to_string(
-                            &ServerMessage::MovePeer { peer: id, pos },
-                        )?);
-                        future::join_all(
-                            peers
-                                .lock()?
-                                .iter_mut()
-                                .map(|(_, peer)| peer.sink.send(msg.clone())),
-                        )
-                        .await;
-                    }
-                }
-            }
-            tungstenite::Message::Close(_) => {
-                break;
-            }
-            _ => {}
+impl std::convert::From<Move> for message::ServerMessage {
+    fn from(msg: Move) -> Self {
+        Self::MovePeer {
+            peer: msg.id,
+            pos: msg.pos,
         }
     }
-
-    peers.lock().unwrap().remove(&id);
-    let msg = tungstenite::Message::Text(serde_json::to_string(&ServerMessage::RemovePeer {
-        peer: id,
-    })?);
-    future::join_all(
-        peers
-            .lock()?
-            .values_mut()
-            .map(|peer| peer.sink.send(msg.clone())),
-    )
-    .await;
-
-    Ok(())
 }
 
-pub fn main(address: &str) -> Result<(), Error> {
-    let rt = runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
+impl Handler<Move> for Server {
+    type Result = ();
 
-    let clients = Arc::new(Mutex::new(HashMap::new()));
+    fn handle(&mut self, msg: Move, _: &mut Context<Self>) -> Self::Result {
+        self.clients.entry(msg.id).and_modify(|e| e.pos = msg.pos);
 
-    let listener = tokio::net::TcpListener::bind(address)
-        .map_ok(TcpListenerStream::new)
-        .try_flatten_stream()
-        .err_into()
-        .and_then(|s| tokio_tungstenite::accept_async(s).err_into())
-        .enumerate()
-        .map(|(id, s)| {
-            s.map(|s| {
-                let (sink, source) = s.split();
-                let pos = Pos {
-                    x: rand::random::<f32>() * 800.0,
-                    y: rand::random::<f32>() * 600.0,
-                };
+        for (&id, client) in self.clients.iter() {
+            if id != msg.id {
+                client.addr.do_send(msg)
+            }
+        }
+    }
+}
 
-                clients.lock().unwrap().insert(id, Peer { pos, sink });
-                (id, source)
+impl Handler<Move> for Ws {
+    type Result = ();
+
+    fn handle(&mut self, msg: Move, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
+        let msg: message::ServerMessage = msg.into();
+        ctx.text(serde_json::to_string(&msg).unwrap());
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+struct PeerMessage {
+    source: usize,
+    msg: message::PeerMessage,
+}
+
+impl Handler<PeerMessage> for Server {
+    type Result = ();
+
+    fn handle(&mut self, msg: PeerMessage, _: &mut Context<Self>) -> Self::Result {
+	if let Some(peer) = self.clients.get(&msg.msg.peer) {
+	    peer.addr.do_send(msg)
+	}
+    }
+}
+
+impl Handler<PeerMessage> for Ws {
+    type Result = ();
+
+    fn handle(&mut self, msg: PeerMessage, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
+	let msg = msg.msg.forward(msg.source);
+	ctx.text(serde_json::to_string(&msg).unwrap());
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+struct Quit {
+    id: usize,
+}
+
+impl Handler<Quit> for Server {
+    type Result = ();
+
+    fn handle(&mut self, msg: Quit, _: &mut Context<Self>) -> Self::Result {
+        self.clients.remove(&msg.id);
+
+        for client in self.clients.values() {
+            client.addr.do_send(RemovePeer { peer: msg.id })
+        }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+struct Hello {
+    state: message::Peer,
+    peers: Vec<message::Peer>,
+}
+
+impl std::convert::From<Hello> for message::ServerMessage {
+    fn from(msg: Hello) -> Self {
+        Self::Hello {
+            state: msg.state,
+            peers: msg.peers,
+        }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+struct AddPeer {
+    peer: message::Peer,
+}
+
+impl std::convert::From<AddPeer> for message::ServerMessage {
+    fn from(msg: AddPeer) -> Self {
+        Self::AddPeer { peer: msg.peer }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+struct RemovePeer {
+    peer: usize,
+}
+
+impl std::convert::From<RemovePeer> for message::ServerMessage {
+    fn from(msg: RemovePeer) -> Self {
+        Self::RemovePeer { peer: msg.peer }
+    }
+}
+
+struct Ws {
+    id: usize,
+    server: Addr<Server>,
+}
+
+impl Actor for Ws {
+    type Context = ws::WebsocketContext<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.server
+            .send(Join {
+                addr: ctx.address(),
             })
-        });
+            .into_actor(self)
+            .then(|hello, act, ctx| {
+                match hello {
+                    Ok(hello) => {
+                        act.id = hello.state.id;
+                        let msg: message::ServerMessage = hello.into();
+                        ctx.text(serde_json::to_string(&msg).unwrap())
+                    }
+                    _ => ctx.stop(),
+                }
+                actix::fut::ready(())
+            })
+            .wait(ctx); // Block all other messages until we've registered.
+    }
 
-    let result = listener.try_for_each_concurrent(None, |(i, c)| handle_client(c, i, &clients));
+    fn stopping(&mut self, _: &mut Self::Context) -> Running {
+        self.server.do_send(Quit { id: self.id });
+        Running::Stop
+    }
+}
 
-    rt.block_on(result)
+impl Handler<AddPeer> for Ws {
+    type Result = ();
+
+    fn handle(&mut self, msg: AddPeer, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
+        let msg: message::ServerMessage = msg.into();
+        ctx.text(serde_json::to_string(&msg).unwrap());
+    }
+}
+
+impl Handler<RemovePeer> for Ws {
+    type Result = ();
+
+    fn handle(&mut self, msg: RemovePeer, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
+        let msg: message::ServerMessage = msg.into();
+        ctx.text(serde_json::to_string(&msg).unwrap());
+    }
+}
+
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Ws {
+    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
+        let msg = match msg {
+            Err(_) => {
+                ctx.stop();
+                return;
+            }
+            Ok(msg) => msg,
+        };
+
+        match msg {
+            ws::Message::Text(text) => {
+                match serde_json::from_str::<ClientMessage>(&text).unwrap() {
+                    ClientMessage::Peer { message: msg } => 
+                        self.server.do_send(PeerMessage {
+			    source: self.id,
+			    msg: msg,
+			}),
+                    ClientMessage::Move { pos } => self.server.do_send(Move { id: self.id, pos }),
+                }
+            }
+            ws::Message::Close(reason) => {
+                ctx.close(reason);
+                ctx.stop();
+            }
+            _ => (),
+        }
+    }
+}
+
+async fn index(
+    req: HttpRequest,
+    stream: web::Payload,
+    server: web::Data<Addr<Server>>,
+) -> impl Responder {
+    ws::start(
+        Ws {
+            id: 0,
+            server: server.get_ref().clone(),
+        },
+        &req,
+        stream,
+    )
+}
+
+pub async fn main(address: &str) -> Result<(), Error> {
+    let server = Server {
+        clients: HashMap::new(),
+    }
+    .start();
+
+    HttpServer::new(move || {
+        App::new()
+            .data(server.clone())
+            .route("/", web::get().to(index))
+    })
+    .bind(address)?
+    .run()
+    .err_into()
+    .await
 }
