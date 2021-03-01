@@ -6,24 +6,29 @@ pub use error::Error;
 
 use futures::TryFutureExt;
 
+use actix::io::SinkWrite;
 use actix::{
     Actor, ActorContext, ActorFuture, Addr, AsyncContext, Context, ContextFutureSpawner, Handler,
-    Message, MessageResult, Running, StreamHandler, WrapFuture
+    Message, MessageResult, Running, StreamHandler, WrapFuture,
 };
 use actix_web::{web, App, HttpRequest, HttpServer, Responder};
-use awc::ws;
 use awc::error::WsProtocolError;
+use awc::ws;
 use awc::Client;
-use actix::io::SinkWrite;
-use futures::stream::{StreamExt};
+use futures::stream::StreamExt;
 use futures::Sink;
 use std::collections::HashMap;
 
-use gstreamer as gst;
+use gst::prelude::{ObjectExt, ToValue};
 use gst::{
     ElementExt, ElementExtManual, GObjectExtManualGst, GstBinExt, GstBinExtManual, PadExt,
     PadExtManual,
 };
+use gstreamer as gst;
+use gstreamer_sdp as gst_sdp;
+use gstreamer_webrtc as gst_webrtc;
+use serde_json::json;
+
 /*
 use std::collections::HashMap;
 use std::marker::{Send, Unpin};
@@ -31,10 +36,6 @@ use std::marker::{Send, Unpin};
 use futures::channel::mpsc;
 use futures::future::{ok, try_select};
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
-use gst::prelude::{ObjectExt, ToValue};
-use gstreamer_sdp as gst_sdp;
-use gstreamer_webrtc as gst_webrtc;
-use serde_json::json;
 use tokio::runtime;
 use tokio_tungstenite::tungstenite;
 
@@ -310,18 +311,24 @@ struct Stream<S: Sink<ws::Message> + Unpin + 'static> {
     peers: HashMap<usize, ()>,
     ws: SinkWrite<ws::Message, S>,
     pipeline: gst::Pipeline,
+    tees: [(&'static str, gst::Element); 2],
 }
 
 impl<S: Sink<ws::Message> + Unpin + 'static> Stream<S> {
     pub fn new(ws: SinkWrite<ws::Message, S>) -> Self {
-	let pipeline = gst::Pipeline::new(Some("pipeline"));
-	let tees = pipeline::add_src(&pipeline, false);
-	pipeline.set_state(gst::State::Playing).unwrap();
+        let pipeline = gst::Pipeline::new(Some("pipeline"));
+        let tees = pipeline::add_src(&pipeline, false);
+        pipeline.set_state(gst::State::Playing).unwrap();
 
-	Self {peers: HashMap::new(), ws, pipeline}
+        Self {
+            peers: HashMap::new(),
+            ws,
+            pipeline,
+            tees,
+        }
     }
 
-    fn add_peer(peer: usize, polite: bool) {
+    fn add_peer(&mut self, peer: usize, polite: bool) {
         let bin = gst::Bin::new(None);
         let webrtcbin = gst::ElementFactory::find("webrtcbin")
             .unwrap()
@@ -329,7 +336,8 @@ impl<S: Sink<ws::Message> + Unpin + 'static> Stream<S> {
             .unwrap();
         bin.add(&webrtcbin).unwrap();
 
-        let tee_pads = tees
+        let tee_pads = self
+            .tees
             .iter()
             .map(|(_, tee)| {
                 let template = tee.get_pad_template(&"src_%u").unwrap();
@@ -337,7 +345,8 @@ impl<S: Sink<ws::Message> + Unpin + 'static> Stream<S> {
             })
             .collect::<Vec<_>>();
 
-        let bin_pads = tees
+        let bin_pads = self
+            .tees
             .iter()
             .map(|(name, _)| {
                 let queue = gst::ElementFactory::find("queue")
@@ -352,9 +361,88 @@ impl<S: Sink<ws::Message> + Unpin + 'static> Stream<S> {
                     .unwrap()
             })
             .collect::<Vec<_>>();
-    }
-}
 
+        for bin_pad in bin_pads.iter() {
+            bin.add_pad(bin_pad).unwrap();
+        }
+
+        webrtcbin
+            .connect("on-negotiation-needed", false, move |values| {
+                let webrtcbin = values[0].get::<gst::Element>().unwrap().unwrap();
+
+                let promise = gst::Promise::with_change_func({
+                    let webrtcbin = webrtcbin.clone();
+                    move |reply| {
+                        let offer = reply
+                            .unwrap()
+                            .unwrap()
+                            .get_value("offer")
+                            .unwrap()
+                            .get::<gst_webrtc::WebRTCSessionDescription>()
+                            .unwrap()
+                            .unwrap();
+
+                        webrtcbin
+                            .emit("set-local-description", &[&offer, &None::<gst::Promise>])
+                            .unwrap();
+
+                        let msg = message::PeerMessage {
+                            peer,
+                            data: message::PeerMessageData::SDP {
+                                data: json!({
+                                    "type": "offer",
+                                    "sdp": offer.get_sdp().as_text().unwrap(),
+                                }),
+                            },
+                        };
+
+                        self.ws
+                            .write(ws::Message::Text(serde_json::to_string(&msg).unwrap()));
+                    }
+                });
+
+                webrtcbin
+                    .emit("create-offer", &[&None::<gst::Structure>, &promise])
+                    .unwrap();
+                None
+            })
+            .unwrap();
+
+        webrtcbin
+            .connect("on-ice-candidate", false, move |values| {
+                let media_index = values[1].get_some::<u32>().unwrap();
+                let candidate = values[2].get::<String>().unwrap().unwrap();
+
+                let msg = message::PeerMessage {
+                    peer,
+                    data: message::PeerMessageData::ICECandidate {
+                        data: json!({
+                            "sdpMLineIndex": media_index,
+                            "candidate": candidate,
+                        }),
+                    },
+                };
+                self.ws
+                    .write(ws::Message::Text(serde_json::to_string(&msg).unwrap()));
+
+                None
+            })
+            .unwrap();
+
+        self.pipeline.add(&bin).unwrap();
+        bin.set_state(gst::State::Ready).unwrap();
+        if !polite {
+            for (bin_pad, tee_pad) in bin_pads.iter().zip(tee_pads.iter()) {
+                tee_pad.link(bin_pad).unwrap();
+            }
+            bin.sync_state_with_parent().unwrap();
+        }
+    }
+
+    fn negotiate(&mut self) {}
+
+    fn send_ice_candidate(&mut self) {}
+}
 
 impl<S: Sink<ws::Message> + Unpin + 'static> Actor for Stream<S> {
     type Context = Context<Self>;
@@ -364,41 +452,41 @@ impl<S: Sink<ws::Message> + Unpin + 'static> Actor for Stream<S> {
     }
 }
 
-impl<S: Sink<ws::Message> + Unpin + 'static> StreamHandler<Result<ws::Frame, WsProtocolError>> for Stream<S> {
+impl<S: Sink<ws::Message> + Unpin + 'static> StreamHandler<Result<ws::Frame, WsProtocolError>>
+    for Stream<S>
+{
     fn handle(&mut self, msg: Result<ws::Frame, WsProtocolError>, ctx: &mut Self::Context) {
         let msg = match msg {
             Err(_) => {
                 ctx.stop();
                 return;
             }
-	    Ok(ws::Frame::Close(reason)) => {
-		ctx.stop();
-		return;
-	    }
+            Ok(ws::Frame::Close(reason)) => {
+                ctx.stop();
+                return;
+            }
             Ok(ws::Frame::Text(msg)) => msg,
-	    _ => return,
+            _ => return,
         };
 
-
-	match serde_json::from_slice::<message::ServerMessage>(&msg).unwrap() {
+        match serde_json::from_slice::<message::ServerMessage>(&msg).unwrap() {
             _ => (),
-	}
+        }
     }
 }
 
-impl<S: Sink<ws::Message> + Unpin + 'static> actix::io::WriteHandler<WsProtocolError> for Stream<S> {}
+impl<S: Sink<ws::Message> + Unpin + 'static> actix::io::WriteHandler<WsProtocolError>
+    for Stream<S>
+{
+}
 
 pub async fn main(address: &str) -> Result<(), Error> {
-    let (response, conn) = Client::new()
-	.ws(address)
-	.connect()
-	.await
-	.unwrap();
+    let (response, conn) = Client::new().ws(address).connect().await.unwrap();
 
     let addr = Stream::create(|ctx| {
-	let (sink, stream) = conn.split();
-	Stream::add_stream(stream, ctx);
-	Stream::new(SinkWrite::new(sink, ctx))
+        let (sink, stream) = conn.split();
+        Stream::add_stream(stream, ctx);
+        Stream::new(SinkWrite::new(sink, ctx))
     });
 
     Ok(())

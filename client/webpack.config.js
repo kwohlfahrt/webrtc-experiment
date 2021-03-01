@@ -19,7 +19,7 @@ module.exports = ({ slow, standalone }, { mode }) => ({
         ws: true,
       },
     },
-    publicPath: "/" + PUBLIC
+    publicPath: "/" + PUBLIC,
   },
   module: {
     rules: [

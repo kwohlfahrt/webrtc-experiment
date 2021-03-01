@@ -1,8 +1,8 @@
 mod error;
 pub mod message;
 
-use std::collections::HashMap;
 use futures::TryFutureExt;
+use std::collections::HashMap;
 
 use actix::{
     Actor, ActorContext, ActorFuture, Addr, AsyncContext, Context, ContextFutureSpawner, Handler,
@@ -13,7 +13,7 @@ use actix_web_actors::ws;
 use rand::random;
 
 pub use error::Error;
-use message::{ClientMessage, ServerMessage, Pos};
+use message::{ClientMessage, Pos, ServerMessage};
 
 struct Server {
     clients: HashMap<usize, Client>,
@@ -48,7 +48,8 @@ impl Handler<Join> for Server {
 
         let reply = ServerMessage::Hello {
             state,
-            peers: self.clients
+            peers: self
+                .clients
                 .iter()
                 .map(|(&id, client)| message::Peer {
                     id,
@@ -96,8 +97,8 @@ impl Handler<Move> for Server {
         self.clients.entry(msg.id).and_modify(|e| e.pos = msg.pos);
 
         for client in self.clients.values() {
-	    client.addr.do_send(msg.into())
-	}
+            client.addr.do_send(msg.into())
+        }
     }
 }
 
@@ -112,9 +113,9 @@ impl Handler<PeerMessage> for Server {
     type Result = ();
 
     fn handle(&mut self, msg: PeerMessage, _: &mut Context<Self>) -> Self::Result {
-	if let Some(peer) = self.clients.get(&msg.msg.peer) {
-	    peer.addr.do_send(msg.msg.forward(msg.source))
-	}
+        if let Some(peer) = self.clients.get(&msg.msg.peer) {
+            peer.addr.do_send(msg.msg.forward(msg.source))
+        }
     }
 }
 
@@ -131,7 +132,9 @@ impl Handler<Quit> for Server {
         self.clients.remove(&msg.id);
 
         for client in self.clients.values() {
-            client.addr.do_send(ServerMessage::RemovePeer { peer: msg.id })
+            client
+                .addr
+                .do_send(ServerMessage::RemovePeer { peer: msg.id })
         }
     }
 }
@@ -177,7 +180,7 @@ impl Handler<ServerMessage> for Ws {
     type Result = ();
 
     fn handle(&mut self, msg: ServerMessage, ctx: &mut ws::WebsocketContext<Self>) -> Self::Result {
-	ctx.text(serde_json::to_string(&msg).unwrap());
+        ctx.text(serde_json::to_string(&msg).unwrap());
     }
 }
 
@@ -194,11 +197,10 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Ws {
         match msg {
             ws::Message::Text(text) => {
                 match serde_json::from_str::<ClientMessage>(&text).unwrap() {
-                    ClientMessage::Peer { message: msg } => 
-                        self.server.do_send(PeerMessage {
-			    source: self.id,
-			    msg: msg,
-			}),
+                    ClientMessage::Peer { message: msg } => self.server.do_send(PeerMessage {
+                        source: self.id,
+                        msg: msg,
+                    }),
                     ClientMessage::Move { pos } => self.server.do_send(Move { id: self.id, pos }),
                 }
             }

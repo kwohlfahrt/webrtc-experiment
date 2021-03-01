@@ -117,7 +117,7 @@ fn add_src_type(pipeline: &gst::Pipeline, ty: SrcType, monitor: bool) -> gst::El
     tee
 }
 
-pub fn add_src(pipeline: &gst::Pipeline, monitor: bool) -> [(&str, gst::Element); 2] {
+pub fn add_src(pipeline: &gst::Pipeline, monitor: bool) -> [(&'static str, gst::Element); 2] {
     let video_src = add_src_type(pipeline, SrcType::Video, monitor);
     let audio_src = add_src_type(pipeline, SrcType::Audio, monitor);
     [("audio", audio_src), ("video", video_src)]
