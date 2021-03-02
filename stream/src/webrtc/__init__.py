@@ -1,5 +1,6 @@
 import asyncio
 from sys import argv
+import json
 
 import websockets
 import gi
@@ -16,8 +17,13 @@ class Stream:
         self.server = server
 
     async def run(self):
-        return
-
+        conn = await websockets.connect(self.server)
+        async for msg in conn:
+            if msg['type'] == "Hello":
+                self.id = msg['state']['id']
+                self.peers = msg['state']['peers']
+                for peer in self.peers:
+                    pass
 
 def main():
     server = argv[1]
