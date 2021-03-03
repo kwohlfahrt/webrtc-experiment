@@ -19,7 +19,7 @@ use serde_json::json;
 use tokio::runtime;
 use tokio_tungstenite::tungstenite;
 
-use crate::signalling::message::{PeerMessage, PeerMessageData, ServerMessage};
+use crate::signalling::message::{ClientMessage, PeerMessage, PeerMessageData, ServerMessage};
 
 pub use error::Error;
 
@@ -32,7 +32,7 @@ where
         + 'static,
 {
     let mut peers: HashMap<usize, _> = HashMap::new();
-    let (tx, rx) = mpsc::unbounded::<PeerMessage>();
+    let (tx, rx) = mpsc::unbounded::<ClientMessage>();
 
     let pipeline = gst::Pipeline::new(Some("pipeline"));
     let tees = pipeline::add_src(&pipeline, false);
@@ -97,7 +97,8 @@ where
                                 .emit("set-local-description", &[&offer, &None::<gst::Promise>])
                                 .unwrap();
 
-                            tx.unbounded_send(PeerMessage {
+                            tx.unbounded_send(ClientMessage::Peer{
+				message: PeerMessage {
                                 peer,
                                 data: PeerMessageData::SDP {
                                     data: json!({
@@ -105,7 +106,7 @@ where
                                         "sdp": offer.get_sdp().as_text().unwrap(),
                                     }),
                                 },
-                            })
+				}})
                             .unwrap();
                         }
                     });
@@ -125,7 +126,8 @@ where
                     let media_index = values[1].get_some::<u32>().unwrap();
                     let candidate = values[2].get::<String>().unwrap().unwrap();
 
-                    tx.unbounded_send(PeerMessage {
+                    tx.unbounded_send(ClientMessage::Peer{
+			message: PeerMessage {
                         peer,
                         data: PeerMessageData::ICECandidate {
                             data: json!({
@@ -133,7 +135,7 @@ where
                                 "candidate": candidate,
                             }),
                         },
-                    })
+			}})
                     .unwrap();
                     None
                 }
@@ -248,7 +250,8 @@ where
                                                 )
                                                 .unwrap();
                                             bin.sync_state_with_parent().unwrap();
-                                            tx.unbounded_send(PeerMessage {
+                                            tx.unbounded_send(ClientMessage::Peer{
+						message: PeerMessage {
                                                 peer,
                                                 data: PeerMessageData::SDP {
                                                     data: json!({
@@ -256,7 +259,7 @@ where
                                                         "sdp": answer.get_sdp().as_text().unwrap(),
                                                     }),
                                                 },
-                                            })
+						}})
                                             .unwrap();
                                         }
                                     });
