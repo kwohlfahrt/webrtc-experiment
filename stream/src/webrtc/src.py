@@ -9,6 +9,7 @@ class VideoSrc:
         self.payload = Gst.ElementFactory.make("rtpvp8pay")
         self.payload_filter = Gst.ElementFactory.make("capsfilter")
         self.tee = Gst.ElementFactory.make("tee")
+        self.queue = Gst.ElementFactory.make("queue")
         self.sink = Gst.ElementFactory.make("fakesink")
 
         payload_caps = {
@@ -22,10 +23,19 @@ class VideoSrc:
         self.payload_filter.set_property(
             "caps", Gst.Caps(Gst.Structure("application/x-rtp", **payload_caps))
         )
+        self.sink.set_property("sync", True)
 
-        elems = self.src, self.encoder, self.payload, self.payload_filter, self.tee, self.sink
-        Gst.Element.link_many(*elems)
+        elems = [
+            self.src,
+            self.encoder,
+            self.payload,
+            self.payload_filter,
+            self.tee,
+            self.queue,
+            self.sink
+        ]
         pipeline.add(*elems)
+        Gst.Element.link_many(*elems)
 
 class AudioSrc:
     def __init__(self, pipeline):
@@ -34,6 +44,7 @@ class AudioSrc:
         self.payload = Gst.ElementFactory.make("rtpopuspay")
         self.payload_filter = Gst.ElementFactory.make("capsfilter")
         self.tee = Gst.ElementFactory.make("tee")
+        self.queue = Gst.ElementFactory.make("queue")
         self.sink = Gst.ElementFactory.make("fakesink")
 
         payload_caps = {
@@ -47,7 +58,16 @@ class AudioSrc:
         self.payload_filter.set_property(
             "caps", Gst.Caps(Gst.Structure("application/x-rtp", **payload_caps))
         )
+        self.sink.set_property("sync", True)
 
-        elems = self.src, self.encoder, self.payload, self.payload_filter, self.tee, self.sink
-        Gst.Element.link_many(*elems)
+        elems = [
+            self.src,
+            self.encoder,
+            self.payload,
+            self.payload_filter,
+            self.tee,
+            self.queue,
+            self.sink
+        ]
         pipeline.add(*elems)
+        Gst.Element.link_many(*elems)

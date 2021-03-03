@@ -35,6 +35,7 @@ class Peer:
         answer = reply['answer']
         sdp = {"type": "answer", "sdp": answer.sdp.as_text()}
         self.webrtc.emit('set-local-description', answer, None)
+        self.webrtc.sync_state_with_parent()
         self.send({"type": "SDP", "data": sdp})
 
     def handle_negotiation_needed(self, element):
@@ -49,8 +50,8 @@ class Peer:
     def add_ice_candidate(self, ice):
         m_line_index = ice['sdpMLineIndex']
         candidate = ice['candidate']
-        print(m_line_index, candidate)
-        self.webrtc.emit("add-ice-candidate", m_line_index, candidate)
+        if candidate:
+            self.webrtc.emit("add-ice-candidate", m_line_index, candidate)
 
     # Add an SDP offer from a peer
     def apply_sdp(self, sdp):
@@ -58,13 +59,13 @@ class Peer:
             description_type = GstWebRTC.WebRTCSDPType.OFFER
         elif sdp['type'] == "answer":
             description_type = GstWebRTC.WebRTCSDPType.ANSWER
-        _, sdpmsg = GstSdp.SDPMessage.new()
-        GstSdp.sdp_message_parse_buffer(sdp["sdp"].encode(), sdpmsg)
+        _, sdpmsg = GstSdp.SDPMessage.new_from_text(sdp["sdp"])
         description = GstWebRTC.WebRTCSessionDescription.new(description_type, sdpmsg)
-        print(sdp["sdp"])
         self.webrtc.emit("set-remote-description", description, None)
 
         if sdp["type"] == "offer":
             element = self.webrtc
             promise = Gst.Promise.new_with_change_func(self.handle_answer_created, element, None)
             element.emit('create-answer', None, promise)
+        elif sdp["type"] == "answer":
+            self.webrtc.sync_state_with_parent()
